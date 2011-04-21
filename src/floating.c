@@ -257,17 +257,72 @@ int floating_border_click(xcb_connection_t *conn, Client *client, xcb_button_pre
         return 1;
 }
 
+// mrect is moving rectangle, srect is static rectangle
+bool border_crossing(Rect* mrect, Rect *srect) {
+	uint32_t threshold = 10;
+	bool crossed = false;
+
+	// moving client right border
+	if (abs(mrect->x+mrect->width - srect->x) < threshold) {
+		mrect->x = srect->x-mrect->width;
+		crossed = true;
+	}
+	if (abs(mrect->x+mrect->width - (srect->x+srect->width)) < threshold) {
+		mrect->x = srect->x+srect->width-mrect->width;
+		crossed = true;
+	}
+	// moving client left border
+	if (abs(mrect->x - srect->x) < threshold) {
+		mrect->x = srect->x;
+		crossed = true;
+	}
+	if (abs(mrect->x - (srect->x+srect->width)) < threshold) {
+		mrect->x = srect->x+srect->width;
+		crossed = true;
+	}
+	// moving client bottom border
+	if (abs(mrect->y+mrect->height - srect->y) < threshold) {
+		mrect->y = srect->y-mrect->height;
+		crossed = true;
+	}
+	if (abs(mrect->y+mrect->height - (srect->y+srect->height)) < threshold) {
+		mrect->y = srect->y+srect->height-mrect->height;
+		crossed = true;
+	}
+	// moving client top border
+	if (abs(mrect->y - srect->y) < threshold) {
+		mrect->y = srect->y;
+		crossed = true;
+	}
+	if (abs(mrect->y - (srect->y+srect->height)) < threshold) {
+		mrect->y = srect->y+srect->height;
+		crossed = true;
+	}
+
+	return crossed;
+}
+
 DRAGGING_CB(drag_window_callback) {
         struct xcb_button_press_event_t *event = extra;
-
         /* Reposition the client correctly while moving */
         client->rect.x = old_rect->x + (new_x - event->root_x);
         client->rect.y = old_rect->y + (new_y - event->root_y);
-        reposition_client(conn, client);
-        /* Because reposition_client does not send a faked configure event (only resize does),
-         * we need to initiate that on our own */
-        fake_absolute_configure_notify(conn, client);
-        /* fake_absolute_configure_notify flushes */
+		
+		Rect wrkspace_rect = client->workspace->rect;
+		Client *oclient = TAILQ_FIRST(&(client->workspace->floating_clients));
+		do {
+			if (client == oclient) 
+				continue;
+			border_crossing(&(client->rect), &(oclient->rect)); 
+		} while ((oclient = (TAILQ_NEXT(oclient, floating_clients))) !=
+				TAILQ_END(&(client->workspace->floating_clients)));
+		border_crossing(&(client->rect), &wrkspace_rect);
+
+		reposition_client(conn, client);
+		/* Because reposition_client does not send a faked configure event (only resize does),
+		 * we need to initiate that on our own */
+		fake_absolute_configure_notify(conn, client);
+		/* fake_absolute_configure_notify flushes */
 }
 
 /*
