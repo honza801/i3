@@ -3,7 +3,7 @@
  *
  * i3 - an improved dynamic tiling window manager
  *
- * © 2009-2010 Michael Stapelberg and contributors
+ * © 2009-2011 Michael Stapelberg and contributors
  *
  * See file LICENSE for license information.
  *
@@ -26,6 +26,7 @@
 #include <ev.h>
 #include <yajl/yajl_gen.h>
 #include <yajl/yajl_parse.h>
+#include <yajl/yajl_version.h>
 
 #include "queue.h"
 #include "ipc.h"
@@ -182,7 +183,11 @@ IPC_HANDLER(get_workspaces) {
         if (last_focused == SLIST_END(&(c_ws->focus_stack)))
                 last_focused = NULL;
 
+#if YAJL_MAJOR >= 2
+        yajl_gen gen = yajl_gen_alloc(NULL);
+#else
         yajl_gen gen = yajl_gen_alloc(NULL, NULL);
+#endif
         y(array_open);
 
         TAILQ_FOREACH(ws, workspaces, workspaces) {
@@ -226,7 +231,11 @@ IPC_HANDLER(get_workspaces) {
         y(array_close);
 
         const unsigned char *payload;
+#if YAJL_MAJOR >= 2
+        size_t length;
+#else
         unsigned int length;
+#endif
         y(get_buf, &payload, &length);
 
         ipc_send_message(fd, payload, I3_IPC_REPLY_TYPE_WORKSPACES, length);
@@ -241,7 +250,11 @@ IPC_HANDLER(get_workspaces) {
 IPC_HANDLER(get_outputs) {
         Output *output;
 
+#if YAJL_MAJOR >= 2
+        yajl_gen gen = yajl_gen_alloc(NULL);
+#else
         yajl_gen gen = yajl_gen_alloc(NULL, NULL);
+#endif
         y(array_open);
 
         TAILQ_FOREACH(output, &outputs, outputs) {
@@ -276,7 +289,11 @@ IPC_HANDLER(get_outputs) {
         y(array_close);
 
         const unsigned char *payload;
+#if YAJL_MAJOR >= 2
+        size_t length;
+#else
         unsigned int length;
+#endif
         y(get_buf, &payload, &length);
 
         ipc_send_message(fd, payload, I3_IPC_REPLY_TYPE_OUTPUTS, length);
@@ -287,8 +304,13 @@ IPC_HANDLER(get_outputs) {
  * Callback for the YAJL parser (will be called when a string is parsed).
  *
  */
+#if YAJL_MAJOR >= 2
+static int add_subscription(void *extra, const unsigned char *s,
+                            size_t len) {
+#else
 static int add_subscription(void *extra, const unsigned char *s,
                             unsigned int len) {
+#endif
         ipc_client *client = extra;
 
         DLOG("should add subscription to extra %p, sub %.*s\n", client, len, s);
@@ -338,7 +360,11 @@ IPC_HANDLER(subscribe) {
         memset(&callbacks, 0, sizeof(yajl_callbacks));
         callbacks.yajl_string = add_subscription;
 
+#if YAJL_MAJOR >= 2
+        p = yajl_alloc(&callbacks, NULL, (void*)client);
+#else
         p = yajl_alloc(&callbacks, NULL, NULL, (void*)client);
+#endif
         stat = yajl_parse(p, (const unsigned char*)message, message_size);
         if (stat != yajl_status_ok) {
                 unsigned char *err;
@@ -437,7 +463,8 @@ static void ipc_receive_message(EV_P_ struct ev_io *w, int revents) {
                 n -= strlen(I3_IPC_MAGIC);
 
                 /* The next 32 bit after the magic are the message size */
-                uint32_t message_size = *((uint32_t*)message);
+                uint32_t message_size;
+                memcpy(&message_size, (uint32_t*)message, sizeof(uint32_t));
                 message += sizeof(uint32_t);
                 n -= sizeof(uint32_t);
 
@@ -447,7 +474,8 @@ static void ipc_receive_message(EV_P_ struct ev_io *w, int revents) {
                 }
 
                 /* The last 32 bits of the header are the message type */
-                uint32_t message_type = *((uint32_t*)message);
+                uint32_t message_type;
+                memcpy(&message_type, (uint32_t*)message, sizeof(uint32_t));
                 message += sizeof(uint32_t);
                 n -= sizeof(uint32_t);
 
