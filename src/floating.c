@@ -272,81 +272,116 @@ bool floating_maybe_reassign_ws(Con *con) {
     return true;
 }
 
-// mrect is moving rectangle, srect is static rectangle
-bool border_crossing(Rect* mrect, Rect *srect) {
-	uint32_t threshold = 10;
-	bool crossed = false;
+typedef struct _border_crossing_rects {
+    border_t mborder;
+    border_t sborder;
+} border_crossing_rects; 
 
-	// moving client right border
-	if (abs(mrect->x+mrect->width - srect->x) < threshold) {
-		mrect->x = srect->x-mrect->width;
-		crossed = true;
-	}
-	if (abs(mrect->x+mrect->width - (srect->x+srect->width)) < threshold) {
-		mrect->x = srect->x+srect->width-mrect->width;
-		crossed = true;
-	}
-	// moving client left border
-	if (abs(mrect->x - srect->x) < threshold) {
-		mrect->x = srect->x;
-		crossed = true;
-	}
-	if (abs(mrect->x - (srect->x+srect->width)) < threshold) {
-		mrect->x = srect->x+srect->width;
-		crossed = true;
-	}
-	// moving client bottom border
-	if (abs(mrect->y+mrect->height - srect->y) < threshold) {
-		mrect->y = srect->y-mrect->height;
-		crossed = true;
-	}
-	if (abs(mrect->y+mrect->height - (srect->y+srect->height)) < threshold) {
-		mrect->y = srect->y+srect->height-mrect->height;
-		crossed = true;
-	}
-	// moving client top border
-	if (abs(mrect->y - srect->y) < threshold) {
-		mrect->y = srect->y;
-		crossed = true;
-	}
-	if (abs(mrect->y - (srect->y+srect->height)) < threshold) {
-		mrect->y = srect->y+srect->height;
-		crossed = true;
-	}
+/*
+ * Checks if rectangles are crossing, if so, sets the flag
+ * Prameters: mrect is moving rectangle, srect is static rectangle
+ */
+border_crossing_rects border_crossing(Rect* mrect, Rect *srect) {
+    uint32_t threshold = 10;
+    border_crossing_rects crossed;
+    crossed.mborder = 0;
+    crossed.sborder = 0;
 
-	return crossed;
+    // moving client left border
+    if (abs(mrect->x - srect->x) < threshold) {
+        crossed.mborder |= BORDER_LEFT;
+        crossed.sborder |= BORDER_LEFT;
+    }
+    else if (abs(mrect->x - (srect->x+srect->width)) < threshold) {
+        crossed.mborder |= BORDER_LEFT;
+        crossed.sborder |= BORDER_RIGHT;
+    }
+    // moving client right border
+    if (abs(mrect->x+mrect->width - srect->x) < threshold) {
+        crossed.mborder |= BORDER_RIGHT;
+        crossed.sborder |= BORDER_LEFT;
+    }
+    else if (abs(mrect->x+mrect->width - (srect->x+srect->width)) < threshold) {
+        crossed.mborder |= BORDER_RIGHT;
+        crossed.sborder |= BORDER_RIGHT;
+    }
+    // moving client top border
+    if (abs(mrect->y - srect->y) < threshold) {
+        crossed.mborder |= BORDER_TOP;
+        crossed.sborder |= BORDER_TOP;
+    }
+    else if (abs(mrect->y - (srect->y+srect->height)) < threshold) {
+        crossed.mborder |= BORDER_TOP;
+        crossed.sborder |= BORDER_BOTTOM;
+    }
+    // moving client bottom border
+    if (abs(mrect->y+mrect->height - srect->y) < threshold) {
+        crossed.mborder |= BORDER_BOTTOM;
+        crossed.sborder |= BORDER_TOP;
+    }
+    else if (abs(mrect->y+mrect->height - (srect->y+srect->height)) < threshold) {
+        crossed.mborder |= BORDER_BOTTOM;
+        crossed.sborder |= BORDER_BOTTOM;
+    }
+
+    return crossed;
 }
 
 DRAGGING_CB(drag_window_callback) {
-//=======
-//		Client *oclient = TAILQ_FIRST(&(client->workspace->floating_clients));
-//		do {
-//			if (client == oclient) 
-//				continue;
-//			border_crossing(&(client->rect), &(oclient->rect)); 
-//		} while ((oclient = (TAILQ_NEXT(oclient, floating_clients))) !=
-//				TAILQ_END(&(client->workspace->floating_clients)));
-//		border_crossing(&(client->rect), &wrkspace_rect);
-//=======
-
     struct xcb_button_press_event_t *event = extra;
 
     /* Reposition the client correctly while moving */
     con->rect.x = old_rect->x + (new_x - event->root_x);
     con->rect.y = old_rect->y + (new_y - event->root_y);
-	Con *wrkspace = con;
-    while (wrkspace->type != CT_WORKSPACE) {
-        wrkspace = wrkspace->parent;
-    }
-    
-    Con *ocon = TAILQ_FIRST(&(wrkspace->floating_head));
-    do {
-        if (con == ocon) 
+
+    border_crossing_rects border;
+    Con *wrkspace = con;
+    while (wrkspace->type != CT_WORKSPACE) wrkspace = wrkspace->parent;
+
+    // handle moving snapping windows
+    Con *static_con;
+    Rect mrect = con->rect;
+    Rect srect;
+    TAILQ_FOREACH(static_con, &(wrkspace->floating_head), floating_windows) {
+        if (con == static_con) 
             continue;
-        border_crossing(&(con->rect), &(ocon->rect)); 
-    } while ((ocon = (TAILQ_NEXT(ocon, floating_head))) !=
-        TAILQ_END(&(wrkspace->floating_head)));
-    border_crossing(&(con->rect), &wrkspace_rect);
+        srect = static_con->rect;
+        if ((border = border_crossing(&mrect, &srect)).mborder > 0) {
+            if (border.mborder & BORDER_LEFT && border.sborder & BORDER_LEFT)
+                mrect.x = srect.x;
+            else if (border.mborder & BORDER_LEFT && border.sborder & BORDER_RIGHT)
+                mrect.x = srect.x+srect.width;
+            else if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_LEFT)
+                mrect.x = srect.x-mrect.width;
+            else if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_RIGHT)
+                mrect.x = srect.x+srect.width-mrect.width;
+
+            if (border.mborder & BORDER_TOP && border.sborder & BORDER_TOP)
+                mrect.y = srect.y;
+            else if (border.mborder & BORDER_TOP && border.sborder & BORDER_BOTTOM)
+                mrect.y = srect.y+srect.height;
+            else if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_TOP)
+                mrect.y = srect.y-mrect.height;
+            else if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_BOTTOM)
+                mrect.y = srect.y+srect.height-mrect.height;
+        } 
+    }
+
+    // handle moving workspace snapping
+    srect = wrkspace->rect;
+    if ((border = border_crossing(&mrect, &srect)).mborder > 0) {
+        if (border.mborder & BORDER_LEFT && border.sborder & BORDER_LEFT)
+            mrect.x = srect.x;
+        else if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_RIGHT)
+            mrect.x = srect.x+srect.width-mrect.width;
+
+        if (border.mborder & BORDER_TOP && border.sborder & BORDER_TOP)
+            mrect.y = srect.y;
+        else if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_BOTTOM)
+            mrect.y = srect.y+srect.height-mrect.height;
+    }
+
+    con->rect = mrect;
 
     render_con(con, false);
     x_push_node(con);
@@ -424,7 +459,73 @@ DRAGGING_CB(resize_window_callback) {
     if (corner & BORDER_TOP)
         dest_y = old_rect->y + (old_rect->height - dest_height);
 
-    con->rect = (Rect) { dest_x, dest_y, dest_width, dest_height };
+    Rect mrect = (Rect) { dest_x, dest_y, dest_width, dest_height };
+
+    border_crossing_rects border;
+    Con *wrkspace = con;
+    while (wrkspace->type != CT_WORKSPACE) wrkspace = wrkspace->parent;
+
+    // handle resize snapping windows
+    Con *static_con;
+    Rect srect;
+    TAILQ_FOREACH(static_con, &(wrkspace->floating_head), floating_windows) {
+        if (con == static_con) 
+            continue;
+        srect = static_con->rect;
+        if ((border = border_crossing(&mrect, &srect)).mborder > 0) {
+            if (border.mborder & BORDER_LEFT && border.sborder & BORDER_LEFT) {
+                mrect.width += mrect.x - srect.x;
+                mrect.x = srect.x;
+            }
+            else if (border.mborder & BORDER_LEFT && border.sborder & BORDER_RIGHT) {
+                mrect.width += mrect.x - (srect.x+srect.width);
+                mrect.x = srect.x+srect.width;
+            }
+            if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_RIGHT) {
+                mrect.width = srect.x+srect.width - mrect.x;
+            }
+            else if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_LEFT) {
+                mrect.width = srect.x - mrect.x;
+            }
+
+            if (border.mborder & BORDER_TOP && border.sborder & BORDER_TOP && corner && BORDER_TOP) {
+                mrect.height += mrect.y - srect.y;
+                mrect.y = srect.y;
+            }
+            else if (border.mborder & BORDER_TOP && border.sborder & BORDER_BOTTOM) {
+                mrect.height += mrect.y - (srect.y+srect.height);
+                mrect.y = srect.y+srect.height;
+            }
+            if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_BOTTOM) {
+                mrect.height = srect.y+srect.height - mrect.y;
+            }
+            else if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_TOP) {
+                mrect.height = srect.y - mrect.y;
+            }
+        } 
+    }
+
+    // handle resize workspace snapping
+    srect = wrkspace->rect;
+    if ((border = border_crossing(&mrect, &srect)).mborder > 0) {
+        if (border.mborder & BORDER_LEFT && border.sborder & BORDER_LEFT) {
+            mrect.width += mrect.x - srect.x;
+            mrect.x = srect.x;
+        }
+        else if (border.mborder & BORDER_RIGHT && border.sborder & BORDER_RIGHT) {
+            mrect.width = srect.x+srect.width - mrect.x;
+        }
+
+        if (border.mborder & BORDER_TOP && border.sborder & BORDER_TOP) {
+            mrect.height += mrect.y - srect.y;
+            mrect.y = srect.y;
+        }
+        else if (border.mborder & BORDER_BOTTOM && border.sborder & BORDER_BOTTOM) {
+            mrect.height = srect.y+srect.height - mrect.y;
+        }
+    } 
+
+    con->rect = mrect;
 
     /* TODO: don’t re-render the whole tree just because we change
      * coordinates of a floating window */
