@@ -318,13 +318,7 @@ bool border_crossing(Rect* mrect, Rect *srect) {
 }
 
 DRAGGING_CB(drag_window_callback) {
-//<<<<<<< HEAD
-//        struct xcb_button_press_event_t *event = extra;
-//        /* Reposition the client correctly while moving */
-//        client->rect.x = old_rect->x + (new_x - event->root_x);
-//        client->rect.y = old_rect->y + (new_y - event->root_y);
-//		
-//		Rect wrkspace_rect = client->workspace->rect;
+//=======
 //		Client *oclient = TAILQ_FIRST(&(client->workspace->floating_clients));
 //		do {
 //			if (client == oclient) 
@@ -333,12 +327,6 @@ DRAGGING_CB(drag_window_callback) {
 //		} while ((oclient = (TAILQ_NEXT(oclient, floating_clients))) !=
 //				TAILQ_END(&(client->workspace->floating_clients)));
 //		border_crossing(&(client->rect), &wrkspace_rect);
-//
-//		reposition_client(conn, client);
-//		/* Because reposition_client does not send a faked configure event (only resize does),
-//		 * we need to initiate that on our own */
-//		fake_absolute_configure_notify(conn, client);
-//		/* fake_absolute_configure_notify flushes */
 //=======
 
     struct xcb_button_press_event_t *event = extra;
@@ -346,6 +334,19 @@ DRAGGING_CB(drag_window_callback) {
     /* Reposition the client correctly while moving */
     con->rect.x = old_rect->x + (new_x - event->root_x);
     con->rect.y = old_rect->y + (new_y - event->root_y);
+	Con *wrkspace = con;
+    while (wrkspace->type != CT_WORKSPACE) {
+        wrkspace = wrkspace->parent;
+    }
+    
+    Con *ocon = TAILQ_FIRST(&(wrkspace->floating_head));
+    do {
+        if (con == ocon) 
+            continue;
+        border_crossing(&(con->rect), &(ocon->rect)); 
+    } while ((ocon = (TAILQ_NEXT(ocon, floating_head))) !=
+        TAILQ_END(&(wrkspace->floating_head)));
+    border_crossing(&(con->rect), &wrkspace_rect);
 
     render_con(con, false);
     x_push_node(con);
