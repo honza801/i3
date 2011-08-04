@@ -365,40 +365,67 @@ void init_ws_for_output(Output *output, Con *content) {
     DLOG("Now adding a workspace\n");
 
     /* add a workspace to this output */
+    Con *out, *current;
+    bool exists = true;
     Con *ws = con_new(NULL, NULL);
     ws->type = CT_WORKSPACE;
 
-    /* get the next unused workspace number */
-    DLOG("Getting next unused workspace\n");
-    int c = 0;
-    bool exists = true;
-    while (exists) {
-        Con *out, *current, *child;
-
-        c++;
-
+    /* try the configured workspace bindings first to find a free name */
+    Binding *bind;
+    TAILQ_FOREACH(bind, bindings, bindings) {
+        DLOG("binding with command %s\n", bind->command);
+        if (strlen(bind->command) < strlen("workspace ") ||
+            strncasecmp(bind->command, "workspace", strlen("workspace")) != 0)
+            continue;
+        DLOG("relevant command = %s\n", bind->command);
+        char *target = bind->command + strlen("workspace ");
+        if (*target == '"')
+            target++;
         FREE(ws->name);
-        asprintf(&(ws->name), "%d", c);
+        ws->name = strdup(target);
+        if (ws->name[strlen(ws->name)-1] == '"')
+            ws->name[strlen(ws->name)-1] = '\0';
+        DLOG("trying name *%s*\n", ws->name);
 
-        exists = false;
-        TAILQ_FOREACH(out, &(croot->nodes_head), nodes) {
-            TAILQ_FOREACH(current, &(out->nodes_head), nodes) {
-                if (current->type != CT_CON)
-                    continue;
+        current = NULL;
+        TAILQ_FOREACH(out, &(croot->nodes_head), nodes)
+            GREP_FIRST(current, output_get_content(out), !strcasecmp(child->name, ws->name));
 
-                TAILQ_FOREACH(child, &(current->nodes_head), nodes) {
-                    if (strcasecmp(child->name, ws->name) != 0)
-                        continue;
+        exists = (current != NULL);
+        if (!exists) {
+            /* Set ->num to the number of the workspace, if the name actually
+             * is a number or starts with a number */
+            long parsed_num = strtol(ws->name, NULL, 10);
+            if (parsed_num == LONG_MIN ||
+                parsed_num == LONG_MAX ||
+                parsed_num <= 0)
+                ws->num = -1;
+            else ws->num = parsed_num;
+            LOG("Used number %d for workspace with name %s\n", ws->num, ws->name);
 
-                    exists = true;
-                    break;
-                }
-            }
+            break;
         }
-
-        DLOG("result for ws %s / %d: exists = %d\n", ws->name, c, exists);
     }
-    ws->num = c;
+
+    if (exists) {
+        /* get the next unused workspace number */
+        DLOG("Getting next unused workspace by number\n");
+        int c = 0;
+        while (exists) {
+            c++;
+
+            FREE(ws->name);
+            asprintf(&(ws->name), "%d", c);
+
+            current = NULL;
+            TAILQ_FOREACH(out, &(croot->nodes_head), nodes)
+                GREP_FIRST(current, output_get_content(out), !strcasecmp(child->name, ws->name));
+            exists = (current != NULL);
+
+            DLOG("result for ws %s / %d: exists = %d\n", ws->name, c, exists);
+        }
+        ws->num = c;
+    }
     con_attach(ws, content, false);
 
     asprintf(&name, "[i3 con] workspace %s", ws->name);

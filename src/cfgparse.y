@@ -8,7 +8,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <limits.h>
 
 #include "all.h"
 
@@ -685,6 +684,11 @@ matchend:
     ;
 
 criteria:
+    criteria criterion
+    | criterion
+    ;
+
+criterion:
     TOK_CLASS '=' STR
     {
         printf("criteria: class = %s\n", $3);
@@ -986,7 +990,7 @@ assign:
         /* Compatibility with older versions: If the assignment target starts
          * with ~, we create the equivalent of:
          *
-         * for_window [class="foo"] mode floating
+         * for_window [class="foo"] floating enable
          */
         if (*workspace == '~') {
             workspace++;

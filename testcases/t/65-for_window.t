@@ -1,5 +1,6 @@
 #!perl
 # vim:ts=4:sw=4:expandtab
+# !NO_I3_INSTANCE! will prevent complete-run.pl from starting i3
 #
 #
 use X11::XCB qw(:all);
@@ -8,8 +9,6 @@ use i3test;
 
 my $x = X11::XCB::Connection->new;
 
-my $tmp = fresh_workspace;
-
 ##############################################################
 # 1: test the following directive:
 #    for_window [class="borderless"] border none
@@ -17,6 +16,17 @@ my $tmp = fresh_workspace;
 # the normal border), then creating a window with the class
 # "borderless" (should get no border)
 ##############################################################
+
+my $config = <<EOT;
+# i3 config file (v4)
+font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
+for_window [class="borderless"] border none
+for_window [title="special borderless title"] border none
+EOT
+
+my $process = launch_with_config($config);
+
+my $tmp = fresh_workspace;
 
 my $window = $x->root->create_child(
     class => WINDOW_CLASS_INPUT_OUTPUT,
@@ -81,10 +91,23 @@ sleep 0.25;
 @content = @{get_ws_content($tmp)};
 cmp_ok(@content, '==', 0, 'no more nodes');
 
+exit_gracefully($process->pid);
+
 ##############################################################
 # 2: match on the title, check if for_window is really executed
 # only once
 ##############################################################
+
+$config = <<EOT;
+# i3 config file (v4)
+font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
+for_window [class="borderless"] border none
+for_window [title="special borderless title"] border none
+EOT
+
+$process = launch_with_config($config);
+
+$tmp = fresh_workspace;
 
 $window = $x->root->create_child(
     class => WINDOW_CLASS_INPUT_OUTPUT,
@@ -126,9 +149,24 @@ sleep 0.25;
 @content = @{get_ws_content($tmp)};
 cmp_ok(@content, '==', 0, 'no more nodes');
 
+exit_gracefully($process->pid);
+
 ##############################################################
 # 3: match on the title, set border style *and* a mark
 ##############################################################
+
+$config = <<EOT;
+# i3 config file (v4)
+font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
+for_window [class="borderless" title="usethis"] border none
+for_window [class="borderless"] border none
+for_window [title="special borderless title"] border none
+for_window [title="special mark title"] border none, mark bleh
+EOT
+
+$process = launch_with_config($config);
+
+$tmp = fresh_workspace;
 
 $window = $x->root->create_child(
     class => WINDOW_CLASS_INPUT_OUTPUT,
@@ -156,5 +194,56 @@ cmd qq|[con_mark="bleh"] focus|;
 
 @content = @{get_ws_content($tmp)};
 ok($content[0]->{focused}, 'first node focused');
+
+exit_gracefully($process->pid);
+
+##############################################################
+# 4: multiple criteria for the for_window command
+##############################################################
+
+$config = <<EOT;
+# i3 config file (v4)
+font -misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1
+for_window [class="borderless" title="usethis"] border none
+EOT
+
+$process = launch_with_config($config);
+
+$tmp = fresh_workspace;
+
+$window = $x->root->create_child(
+    class => WINDOW_CLASS_INPUT_OUTPUT,
+    rect => [ 0, 0, 30, 30 ],
+    background_color => '#00ff00',
+);
+
+$window->_create;
+
+set_wm_class($window->id, 'borderless', 'borderless');
+$window->name('usethis');
+$window->map;
+sleep 0.25;
+
+@content = @{get_ws_content($tmp)};
+cmp_ok(@content, '==', 1, 'one node on this workspace now');
+is($content[0]->{border}, 'none', 'no border');
+
+$window->unmap;
+sleep 0.25;
+
+@content = @{get_ws_content($tmp)};
+cmp_ok(@content, '==', 0, 'no nodes on this workspace now');
+
+set_wm_class($window->id, 'borderless', 'borderless');
+$window->name('notthis');
+$window->map;
+sleep 0.25;
+
+@content = @{get_ws_content($tmp)};
+cmp_ok(@content, '==', 1, 'one node on this workspace now');
+is($content[0]->{border}, 'normal', 'no border');
+
+
+exit_gracefully($process->pid);
 
 done_testing;
