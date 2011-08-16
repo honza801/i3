@@ -1,7 +1,7 @@
 i3 User’s Guide
 ===============
 Michael Stapelberg <michael+i3@stapelberg.de>
-July 2011
+August 2011
 
 This document contains all the information you need to configure and use the i3
 window manager. If it does not, please contact us on IRC (preferred) or post your
@@ -680,9 +680,10 @@ split <vertical|horizontal>
 ---------------------------
 
 *Example*:
---------------
-split vertical
---------------
+------------------------------
+bindsym mod+v split vertical
+bindsym mod+h split horizontal
+------------------------------
 
 === Manipulating layout
 
@@ -788,11 +789,11 @@ mode "resize" {
         bindsym j resize shrink left
         bindsym Shift+j resize grow left
 
-        bindsym k resize grow bottom
-        bindsym Shift+k resize shrink bottom
+        bindsym k resize grow down
+        bindsym Shift+k resize shrink down
 
-        bindsym l resize shrink top
-        bindsym Shift+l resize grow top
+        bindsym l resize shrink up
+        bindsym Shift+l resize grow up
 
         bindsym semicolon resize grow right
         bindsym Shift+semicolon resize shrink right

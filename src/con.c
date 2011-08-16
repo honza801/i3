@@ -585,6 +585,14 @@ void con_move_to_workspace(Con *con, Con *workspace) {
         next = ws;
     }
 
+    /* If moving to a visible workspace, call show so it can be considered
+     * focused. Must do before attaching because workspace_show checks to see
+     * if focused container is in its area. */
+    if (source_output != dest_output &&
+        workspace_is_visible(workspace)) {
+        workspace_show(workspace->name);
+    }
+
     DLOG("Re-attaching container to %p / %s\n", next, next->name);
     /* 5: re-attach the con to the parent of this focused container */
     Con *parent = con->parent;
@@ -597,7 +605,7 @@ void con_move_to_workspace(Con *con, Con *workspace) {
     con_fix_percent(next);
 
     /* 7: focus the con on the target workspace (the X focus is only updated by
-     * calling tree_render(), so for the "real" focus this is a no-op) */
+     * calling tree_render(), so for the "real" focus this is a no-op). */
     con_focus(con);
 
     /* 8: when moving to a visible workspace on a different output, we keep the
@@ -607,7 +615,11 @@ void con_move_to_workspace(Con *con, Con *workspace) {
         workspace_is_visible(workspace)) {
         DLOG("Moved to a different output, focusing target\n");
     } else {
-        con_focus(focus_next);
+        /* Descend focus stack in case focus_next is a workspace which can
+         * occur if we move to the same workspace.  Also show current workspace
+         * to ensure it is focused. */
+        workspace_show(con_get_workspace(focus_next)->name);
+        con_focus(con_descend_focused(focus_next));
     }
 
     CALL(parent, on_remove_child);
@@ -773,6 +785,58 @@ Con *con_descend_tiling_focused(Con *con) {
     return next;
 }
 
+/*
+ * Returns the leftmost, rightmost, etc. container in sub-tree. For example, if
+ * direction is D_LEFT, then we return the rightmost container and if direction
+ * is D_RIGHT, we return the leftmost container.  This is because if we are
+ * moving D_LEFT, and thus want the rightmost container.
+ *
+ */
+Con *con_descend_direction(Con *con, direction_t direction) {
+    Con *most = NULL;
+    DLOG("con_descend_direction(%p, %d)\n", con, direction);
+    if (direction == D_LEFT || direction == D_RIGHT) {
+        if (con->orientation == HORIZ) {
+            /* If the direction is horizontal, we can use either the first
+             * (D_RIGHT) or the last con (D_LEFT) */
+            if (direction == D_RIGHT)
+                most = TAILQ_FIRST(&(con->nodes_head));
+            else most = TAILQ_LAST(&(con->nodes_head), nodes_head);
+        } else if (con->orientation == VERT) {
+            /* Wrong orientation. We use the last focused con. Within that con,
+             * we recurse to chose the left/right con or at least the last
+             * focused one. */
+            most = TAILQ_FIRST(&(con->focus_head));
+        } else {
+            /* If the con has no orientation set, it’s not a split container
+             * but a container with a client window, so stop recursing */
+            return con;
+        }
+    }
+
+    if (direction == D_UP || direction == D_DOWN) {
+        if (con->orientation == VERT) {
+            /* If the direction is vertical, we can use either the first
+             * (D_DOWN) or the last con (D_UP) */
+            if (direction == D_UP)
+                most = TAILQ_LAST(&(con->nodes_head), nodes_head);
+            else most = TAILQ_FIRST(&(con->nodes_head));
+        } else if (con->orientation == HORIZ) {
+            /* Wrong orientation. We use the last focused con. Within that con,
+             * we recurse to chose the top/bottom con or at least the last
+             * focused one. */
+            most = TAILQ_FIRST(&(con->focus_head));
+        } else {
+            /* If the con has no orientation set, it’s not a split container
+             * but a container with a client window, so stop recursing */
+            return con;
+        }
+    }
+
+    if (!most)
+        return con;
+    return con_descend_direction(most, direction);
+}
 
 /*
  * Returns a "relative" Rect which contains the amount of pixels that need to
