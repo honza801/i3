@@ -335,6 +335,7 @@ void load_configuration(xcb_connection_t *conn, const char *override_configpath,
         config.default_border = BS_NORMAL;
         /* Set default_orientation to NO_ORIENTATION for auto orientation. */
         config.default_orientation = NO_ORIENTATION;
+        config.snap_threshold = 10;
 
         parse_configuration(override_configpath);
 

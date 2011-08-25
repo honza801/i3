@@ -126,6 +126,9 @@ struct Config {
         /** The default border style for new windows. */
         border_style_t default_border;
 
+        /** The default floating window edge snap threshold */
+        int snap_threshold;
+
         /** The modifier which needs to be pressed in combination with your mouse
          * buttons to do things with floating windows (move, resize) */
         uint32_t floating_modifier;

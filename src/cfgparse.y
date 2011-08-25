@@ -544,6 +544,7 @@ void parse_file(const char *f) {
 %token                  TOK_IGNORE                  "ignore"
 %token                  TOK_LEAVE_FULLSCREEN        "leave_fullscreen"
 %token                  TOK_FOR_WINDOW              "for_window"
+%token                  TOK_SNAP_THRESHOLD          "snap_threshold"
 
 %token              TOK_MARK            "mark"
 %token              TOK_CLASS           "class"
@@ -582,6 +583,7 @@ line:
     | for_window
     | mode
     | floating_modifier
+    | snap_threshold
     | orientation
     | workspace_layout
     | new_window
@@ -801,6 +803,15 @@ floating_modifier:
         config.floating_modifier = $2;
     }
     ;
+
+snap_threshold:
+    TOK_SNAP_THRESHOLD NUMBER
+    {
+        DLOG("snap threshold= %d\n", $2);
+        config.snap_threshold = $2;
+    }
+    ;
+
 
 orientation:
     TOK_ORIENTATION direction

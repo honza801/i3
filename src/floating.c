@@ -297,44 +297,43 @@ typedef struct _border_crossing_rects {
  * Prameters: mrect is moving rectangle, srect is static rectangle
  */
 border_crossing_rects border_crossing(Rect* mrect, Rect *srect) {
-    uint32_t threshold = 10;
     border_crossing_rects crossed;
     crossed.mborder = 0;
     crossed.sborder = 0;
 
     // moving client left border
-    if (abs(mrect->x - srect->x) < threshold) {
+    if (abs(mrect->x - srect->x) < config.snap_threshold) {
         crossed.mborder |= BORDER_LEFT;
         crossed.sborder |= BORDER_LEFT;
     }
-    else if (abs(mrect->x - (srect->x+srect->width)) < threshold) {
+    else if (abs(mrect->x - (srect->x+srect->width)) < config.snap_threshold) {
         crossed.mborder |= BORDER_LEFT;
         crossed.sborder |= BORDER_RIGHT;
     }
     // moving client right border
-    if (abs(mrect->x+mrect->width - srect->x) < threshold) {
+    if (abs(mrect->x+mrect->width - srect->x) < config.snap_threshold) {
         crossed.mborder |= BORDER_RIGHT;
         crossed.sborder |= BORDER_LEFT;
     }
-    else if (abs(mrect->x+mrect->width - (srect->x+srect->width)) < threshold) {
+    else if (abs(mrect->x+mrect->width - (srect->x+srect->width)) < config.snap_threshold) {
         crossed.mborder |= BORDER_RIGHT;
         crossed.sborder |= BORDER_RIGHT;
     }
     // moving client top border
-    if (abs(mrect->y - srect->y) < threshold) {
+    if (abs(mrect->y - srect->y) < config.snap_threshold) {
         crossed.mborder |= BORDER_TOP;
         crossed.sborder |= BORDER_TOP;
     }
-    else if (abs(mrect->y - (srect->y+srect->height)) < threshold) {
+    else if (abs(mrect->y - (srect->y+srect->height)) < config.snap_threshold) {
         crossed.mborder |= BORDER_TOP;
         crossed.sborder |= BORDER_BOTTOM;
     }
     // moving client bottom border
-    if (abs(mrect->y+mrect->height - srect->y) < threshold) {
+    if (abs(mrect->y+mrect->height - srect->y) < config.snap_threshold) {
         crossed.mborder |= BORDER_BOTTOM;
         crossed.sborder |= BORDER_TOP;
     }
-    else if (abs(mrect->y+mrect->height - (srect->y+srect->height)) < threshold) {
+    else if (abs(mrect->y+mrect->height - (srect->y+srect->height)) < config.snap_threshold) {
         crossed.mborder |= BORDER_BOTTOM;
         crossed.sborder |= BORDER_BOTTOM;
     }

@@ -96,6 +96,7 @@ bind                            { yy_push_state(WANT_STRING); yy_push_state(EAT_
 bindcode                        { yy_push_state(WANT_STRING); yy_push_state(EAT_WHITESPACE); yy_push_state(EAT_WHITESPACE); return TOKBINDCODE; }
 bindsym                         { yy_push_state(BINDSYM_COND); yy_push_state(EAT_WHITESPACE); return TOKBINDSYM; }
 floating_modifier               { BEGIN(INITIAL); return TOKFLOATING_MODIFIER; }
+snap_threshold                  { BEGIN(INITIAL); return TOK_SNAP_THRESHOLD; }
 workspace                       { BEGIN(INITIAL); return TOKWORKSPACE; }
 output                          { yy_push_state(OUTPUT_COND); yy_push_state(EAT_WHITESPACE); return TOKOUTPUT; }
 screen                          {
