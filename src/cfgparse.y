@@ -188,6 +188,7 @@ static char *migrate_config(char *input, off_t size) {
         ret = read(readpipe[0], converted + read_bytes, conv_size - read_bytes);
         if (ret == -1) {
             warn("Cannot read from pipe");
+            FREE(converted);
             return NULL;
         }
         read_bytes += ret;
@@ -952,10 +953,25 @@ workspace:
             }
 
             DLOG("Should assign workspace %s to output %s\n", ws_name, $4);
-            struct Workspace_Assignment *assignment = scalloc(sizeof(struct Workspace_Assignment));
-            assignment->name = ws_name;
-            assignment->output = $4;
-            TAILQ_INSERT_TAIL(&ws_assignments, assignment, ws_assignments);
+            /* Check for earlier assignments of the same workspace so that we
+             * don’t have assignments of a single workspace to different
+             * outputs */
+            struct Workspace_Assignment *assignment;
+            bool duplicate = false;
+            TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
+                if (strcasecmp(assignment->name, ws_name) == 0) {
+                    ELOG("You have a duplicate workspace assignment for workspace \"%s\"\n",
+                         ws_name);
+                    assignment->output = $4;
+                    duplicate = true;
+                }
+            }
+            if (!duplicate) {
+                assignment = scalloc(sizeof(struct Workspace_Assignment));
+                assignment->name = ws_name;
+                assignment->output = $4;
+                TAILQ_INSERT_TAIL(&ws_assignments, assignment, ws_assignments);
+            }
         }
     }
     | TOKWORKSPACE NUMBER workspace_name

@@ -78,7 +78,7 @@ tabbed::
 The same principle as +stacking+, but the list of windows at the top is only
 a single line which is vertically split.
 
-To switch modes, press +mod+e+ for default, +mod+h+ for stacking and
+To switch modes, press +mod+e+ for default, +mod+s+ for stacking and
 +mod+w+ for tabbed.
 
 image:modes.png[Container modes]
@@ -160,7 +160,7 @@ paradigm but can be useful for some corner cases like "Save as" dialog
 windows, or toolbar windows (GIMP or similar). Those windows usually set the
 appropriate hint and are opened in floating mode by default.
 
-You can enable floating mode for a window by pressing +mod+Shift+Space+. By
+You can toggle floating mode for a window by pressing +mod+Shift+Space+. By
 dragging the window’s titlebar with your mouse you can move the window
 around. By grabbing the borders and moving them you can resize the window. You
 can also do that by using the <<floating_modifier>>.
@@ -415,7 +415,7 @@ This option determines which border style new windows will have.
 
 *Syntax*:
 ---------------------------------------------
-new_window <normal|1pixel|borderless>
+new_window <normal|1pixel|none>
 ---------------------------------------------
 
 *Example*:
@@ -447,6 +447,8 @@ for_window [class="urxvt"] border 1pixel
 # directory to ~/work
 for_window [title="x200: ~/work"] floating enable
 ------------------------------------------------
+
+The valid criteria are the same as those for commands, see <<command_criteria>>.
 
 === Variables
 
@@ -590,11 +592,14 @@ area of the termianal and the i3 border.
 
 Colors are in HTML hex format (#rrggbb), see the following example:
 
-*Examples*:
---------------------------------------
-# class        border  backgr. text
-client.focused #2F343A #900000 #FFFFFF
---------------------------------------
+*Examples (default colors)*:
+-----------------------------------------------
+# class                 border  backgr. text
+client.focused          #4c7899 #285577 #ffffff
+client.focused_inactive #333333 #5f676a #ffffff
+client.unfocused        #333333 #222222 #888888
+client.urgent           #2f343a #900000 #ffffff
+-----------------------------------------------
 
 Note that for the window decorations, the color around the child window is the
 background color, and the border color is only the two thin lines at the top of
@@ -662,7 +667,80 @@ popup_during_fullscreen <ignore|leave_fullscreen>
 popup_during_fullscreen ignore
 ------------------------------
 
+=== Focus wrapping
+
+When being in a tabbed or stacked container, the first container will be
+focused when you use +focus down+ on the last container -- the focus wraps. If
+however there is another stacked/tabbed container in that direction, focus will
+be set on that container. This is the default behaviour so you can navigate to
+all your windows without having to use +focus parent+.
+
+If you want the focus to *always* wrap and you are aware of using +focus
+parent+ to switch to different containers, you can use the
++force_focus_wrapping+ configuration directive. After enabling it, the focus
+will always wrap.
+
+*Syntax*:
+-----------------------------
+force_focus_wrapping <yes|no>
+-----------------------------
+
+*Example*:
+------------------------
+force_focus_wrapping yes
+------------------------
+
 == List of commands
+
+Commands are what you bind to specific keypresses. You can also issue commands
+at runtime without pressing a key by using the IPC interface. An easy way to
+do this is to use the +i3-msg+ utility:
+
+*Example*:
+--------------------------
+# execute this on your shell to make the current container borderless
+i3-msg border none
+--------------------------
+
+Commands can be chained by using +;+ (a semicolon). So, to move a window to a
+specific workspace and immediately switch to that workspace, you can configure
+the following keybinding:
+
+*Example*:
+-------------------------------------------
+bindsym mod+x move workspace 3; workspace 3
+-------------------------------------------
+
+[[command_criteria]]
+
+Furthermore, you can change the scope of a command, that is, which containers
+should be affected by that command, by using various criteria. These are
+prefixed in square brackets to every command. If you want to kill all windows
+which have the class Firefox, use:
+
+*Example*:
+------------------------------------
+bindsym mod+x [class="Firefox"] kill
+------------------------------------
+
+The criteria which are currently implemented are:
+
+class::
+	Compares the window class (the second part of WM_CLASS)
+instance::
+	Compares the window instance (the first part of WM_CLASS)
+id::
+	Compares the X11 window ID, which you can get via +xwininfo+ for example.
+title::
+	Compares the X11 window title (_NET_WM_NAME or WM_NAME as fallback).
+mark::
+	Compares the mark set for this container, see <<vim_like_marks>>.
+con_id::
+	Compares the i3-internal container ID, which you can get via the IPC
+	interface. Handy for scripting.
+
+Note that currently all criteria are compared case-insensitive and do not
+support regular expressions. This is planned to change in the future.
 
 === Splitting containers
 
@@ -802,7 +880,20 @@ will order them numerically.
 === Resizing containers/windows
 
 If you want to resize containers/windows using your keyboard, you can use the
-+resize+ command, I recommend using it inside a so called +mode+:
++resize+ command:
+
+*Syntax*:
+---------------------------------------------------------
+resize <grow|shrink> <direction> [<px> px] [or <ppt> ppt]
+---------------------------------------------------------
+
+Direction can be one of +up+, +down+, +left+ or +right+. The optional pixel
+argument specifies by how many pixels a *floating container* should be grown or
+shrinked (the default is 10 pixels). The ppt argument means percentage points
+and specifies by how many percentage points a *tiling container* should be
+grown or shrinked (the default is 10 percentage points).
+
+I recommend using the resize command inside a so called +mode+:
 
 .Example: Configuration file, defining a mode for resizing
 ----------------------------------------------------------------------
@@ -825,7 +916,9 @@ mode "resize" {
         bindsym semicolon resize grow right
         bindsym Shift+semicolon resize shrink right
 
-        bindcode 36 mode default
+        # back to normal: Enter or Escape
+        bindsym Return mode "default"
+        bindsym Escape mode "default"
 }
 
 # Enter resize mode

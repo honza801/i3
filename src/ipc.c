@@ -59,8 +59,10 @@ static bool mkdirp(const char *path) {
         copy[strlen(copy)-1] = '\0';
 
     char *sep = strrchr(copy, '/');
-    if (sep == NULL)
+    if (sep == NULL) {
+        FREE(copy);
         return false;
+    }
     *sep = '\0';
     bool result = false;
     if (mkdirp(copy))
@@ -243,7 +245,10 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
     dump_rect(gen, "geometry", con->geometry);
 
     ystr("name");
-    ystr(con->name);
+    if (con->window && con->window->name_json)
+        ystr(con->window->name_json);
+    else
+        ystr(con->name);
 
     if (con->type == CT_WORKSPACE) {
         ystr("num");
