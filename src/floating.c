@@ -91,7 +91,7 @@ void floating_enable(Con *con, bool automatic) {
     /* check if the parent container is empty and close it if so */
     if ((con->parent->type == CT_CON || con->parent->type == CT_FLOATING_CON) && con_num_children(con->parent) == 0) {
         DLOG("Old container empty after setting this child to floating, closing\n");
-        tree_close(con->parent, DONT_KILL_WINDOW, false);
+        tree_close(con->parent, DONT_KILL_WINDOW, false, false);
     }
 
     char *name;
@@ -103,6 +103,7 @@ void floating_enable(Con *con, bool automatic) {
     int deco_height = config.font.height + 5;
 
     DLOG("Original rect: (%d, %d) with %d x %d\n", con->rect.x, con->rect.y, con->rect.width, con->rect.height);
+    DLOG("Geometry = (%d, %d) with %d x %d\n", con->geometry.x, con->geometry.y, con->geometry.width, con->geometry.height);
     Rect zero = { 0, 0, 0, 0 };
     nc->rect = con->geometry;
     /* If the geometry was not set (split containers), we need to determine a
@@ -122,8 +123,12 @@ void floating_enable(Con *con, bool automatic) {
     /* add pixels for the decoration */
     /* TODO: don’t add them when the user automatically puts new windows into
      * 1pixel/borderless mode */
-    nc->rect.height += deco_height + 4;
+    nc->rect.height += deco_height + 2;
     nc->rect.width += 4;
+
+    /* Honor the X11 border */
+    nc->rect.height += con->border_width * 2;
+    nc->rect.width += con->border_width * 2;
 
     /* Some clients (like GIMP’s color picker window) get mapped
      * to (0, 0), so we push them to a reasonable position
@@ -207,7 +212,7 @@ void floating_disable(Con *con, bool automatic) {
     /* 2: kill parent container */
     TAILQ_REMOVE(&(con->parent->parent->floating_head), con->parent, floating_windows);
     TAILQ_REMOVE(&(con->parent->parent->focus_head), con->parent, focused);
-    tree_close(con->parent, DONT_KILL_WINDOW, false);
+    tree_close(con->parent, DONT_KILL_WINDOW, false, false);
 
     /* 3: re-attach to the parent of the currently focused con on the workspace
      * this floating con was on */
@@ -286,7 +291,7 @@ bool floating_maybe_reassign_ws(Con *con) {
     Con *content = output_get_content(output->con);
     Con *ws = TAILQ_FIRST(&(content->focus_head));
     DLOG("Moving con %p / %s to workspace %p / %s\n", con, con->name, ws, ws->name);
-    con_move_to_workspace(con, ws, true);
+    con_move_to_workspace(con, ws, false, true);
     con_focus(con_descend_focused(con));
     return true;
 }

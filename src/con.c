@@ -553,13 +553,20 @@ update_netwm_state:
  * Moves the given container to the currently focused container on the given
  * workspace.
  *
+ * The fix_coordinates flag will translate the current coordinates (offset from
+ * the monitor position basically) to appropriate coordinates on the
+ * destination workspace.
+ * Not enabling this behaviour comes in handy when this function gets called by
+ * floating_maybe_reassign_ws, which will only "move" a floating window when it
+ * *already* changed its coordinates to a different output.
+ *
  * The dont_warp flag disables pointer warping and will be set when this
  * function is called while dragging a floating window.
  *
  * TODO: is there a better place for this function?
  *
  */
-void con_move_to_workspace(Con *con, Con *workspace, bool dont_warp) {
+void con_move_to_workspace(Con *con, Con *workspace, bool fix_coordinates, bool dont_warp) {
     if (con->type == CT_WORKSPACE) {
         DLOG("Moving workspaces is not yet implemented.\n");
         return;
@@ -601,29 +608,39 @@ void con_move_to_workspace(Con *con, Con *workspace, bool dont_warp) {
         next = ws;
     }
 
-    /* If moving to a visible workspace, call show so it can be considered
-     * focused. Must do before attaching because workspace_show checks to see
-     * if focused container is in its area. */
-    if (source_output != dest_output &&
-        workspace_is_visible(workspace)) {
-        workspace_show(workspace->name);
-
-        if (con->type == CT_FLOATING_CON) {
+    if (source_output != dest_output) {
+        /* Take the relative coordinates of the current output, then add them
+         * to the coordinate space of the correct output */
+        if (fix_coordinates && con->type == CT_FLOATING_CON) {
             DLOG("Floating window, fixing coordinates\n");
-            /* Take the relative coordinates of the current output, then add them
-             * to the coordinate space of the correct output */
+            /* First we get the x/y coordinates relative to the x/y coordinates
+             * of the output on which the window is on */
             uint32_t rel_x = (con->rect.x - source_output->rect.x);
             uint32_t rel_y = (con->rect.y - source_output->rect.y);
-            con->rect.x = dest_output->rect.x + rel_x;
-            con->rect.y = dest_output->rect.y + rel_y;
-        }
+            /* Then we calculate a fraction, for example 0.63 for a window
+             * which is at y = 1212 of a 1920 px high output */
+            double fraction_x = ((double)rel_x / source_output->rect.width);
+            double fraction_y = ((double)rel_y / source_output->rect.height);
+            DLOG("rel_x = %d, rel_y = %d, fraction_x = %f, fraction_y = %f, output->w = %d, output->h = %d\n",
+                 rel_x, rel_y, fraction_x, fraction_y, source_output->rect.width, source_output->rect.height);
+            con->rect.x = dest_output->rect.x + (fraction_x * dest_output->rect.width);
+            con->rect.y = dest_output->rect.y + (fraction_y * dest_output->rect.height);
+            DLOG("Resulting coordinates: x = %d, y = %d\n", con->rect.x, con->rect.y);
+        } else DLOG("Not fixing coordinates, fix_coordinates flag = %d\n", fix_coordinates);
 
-        /* Don’t warp if told so (when dragging floating windows with the
-         * mouse for example) */
-        if (dont_warp)
-            x_set_warp_to(NULL);
-        else
-            x_set_warp_to(&(con->rect));
+        /* If moving to a visible workspace, call show so it can be considered
+         * focused. Must do before attaching because workspace_show checks to see
+         * if focused container is in its area. */
+        if (workspace_is_visible(workspace)) {
+            workspace_show(workspace->name);
+
+            /* Don’t warp if told so (when dragging floating windows with the
+             * mouse for example) */
+            if (dont_warp)
+                x_set_warp_to(NULL);
+            else
+                x_set_warp_to(&(con->rect));
+        }
     }
 
     DLOG("Re-attaching container to %p / %s\n", next, next->name);
@@ -827,15 +844,16 @@ Con *con_descend_tiling_focused(Con *con) {
  */
 Con *con_descend_direction(Con *con, direction_t direction) {
     Con *most = NULL;
-    DLOG("con_descend_direction(%p, %d)\n", con, direction);
+    int orientation = con_orientation(con);
+    DLOG("con_descend_direction(%p, orientation %d, direction %d)\n", con, orientation, direction);
     if (direction == D_LEFT || direction == D_RIGHT) {
-        if (con->orientation == HORIZ) {
+        if (orientation == HORIZ) {
             /* If the direction is horizontal, we can use either the first
              * (D_RIGHT) or the last con (D_LEFT) */
             if (direction == D_RIGHT)
                 most = TAILQ_FIRST(&(con->nodes_head));
             else most = TAILQ_LAST(&(con->nodes_head), nodes_head);
-        } else if (con->orientation == VERT) {
+        } else if (orientation == VERT) {
             /* Wrong orientation. We use the last focused con. Within that con,
              * we recurse to chose the left/right con or at least the last
              * focused one. */
@@ -848,13 +866,13 @@ Con *con_descend_direction(Con *con, direction_t direction) {
     }
 
     if (direction == D_UP || direction == D_DOWN) {
-        if (con->orientation == VERT) {
+        if (orientation == VERT) {
             /* If the direction is vertical, we can use either the first
              * (D_DOWN) or the last con (D_UP) */
             if (direction == D_UP)
                 most = TAILQ_LAST(&(con->nodes_head), nodes_head);
             else most = TAILQ_FIRST(&(con->nodes_head));
-        } else if (con->orientation == HORIZ) {
+        } else if (orientation == HORIZ) {
             /* Wrong orientation. We use the last focused con. Within that con,
              * we recurse to chose the top/bottom con or at least the last
              * focused one. */
@@ -1003,7 +1021,7 @@ static void con_on_remove_child(Con *con) {
     int children = con_num_children(con);
     if (children == 0) {
         DLOG("Container empty, closing\n");
-        tree_close(con, DONT_KILL_WINDOW, false);
+        tree_close(con, DONT_KILL_WINDOW, false, false);
         return;
     }
 }

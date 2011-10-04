@@ -533,7 +533,7 @@ kill:
         else {
             TAILQ_FOREACH(current, &owindows, owindows) {
                 printf("matching: %p / %s\n", current->con, current->con->name);
-                tree_close(current->con, $2, false);
+                tree_close(current->con, $2, false, false);
             }
         }
 
@@ -699,7 +699,7 @@ move:
 
         TAILQ_FOREACH(current, &owindows, owindows) {
             printf("matching: %p / %s\n", current->con, current->con->name);
-            con_move_to_workspace(current->con, ws, false);
+            con_move_to_workspace(current->con, ws, true, false);
         }
 
         tree_render();
