@@ -62,13 +62,14 @@ void stdin_io_cb(struct ev_loop *loop, ev_io *watcher, int revents) {
     int buffer_len = STDIN_CHUNK_SIZE;
     char *buffer = smalloc(buffer_len);
     buffer[0] = '\0';
-    int flags = fcntl(fd, F_GETFL);
-    
-    /* set non-blocking flag for the fd */
-    fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
     while(1) {
         n = read(fd, buffer + rec, buffer_len - rec);
         if (n == -1) {
+            if (errno == EAGAIN) {
+                /* remove trailing newline and finish up */
+                buffer[rec-1] = '\0';
+                break;
+            }
             ELOG("read() failed!: %s\n", strerror(errno));
             exit(EXIT_FAILURE);
         }
@@ -86,19 +87,11 @@ void stdin_io_cb(struct ev_loop *loop, ev_io *watcher, int revents) {
         }
         rec += n;
 
-        /* end of the reading cycle if there is \n present */
-        if (strchr(buffer, '\n') > 0) {
-                buffer[rec-1] = '\0';
-                break;
-        }
-
         if (rec == buffer_len) {
             buffer_len += STDIN_CHUNK_SIZE;
             buffer = srealloc(buffer, buffer_len);
         }
     }
-    /* set the flags back */
-    fcntl(fd, F_SETFL, flags);
     if (*buffer == '\0') {
         FREE(buffer);
         return;
