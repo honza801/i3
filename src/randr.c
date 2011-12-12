@@ -420,11 +420,12 @@ void init_ws_for_output(Output *output, Con *content) {
             continue;
         DLOG("relevant command = %s\n", bind->command);
         char *target = bind->command + strlen("workspace ");
-        /* We check if this is the workspace next/prev command. Beware: The
-         * workspace names "next" and "prev" are OK, so we check before
-         * stripping the double quotes */
+        /* We check if this is the workspace next/prev/back_and_forth command.
+         * Beware: The workspace names "next", "prev" and "back_and_forth" are
+         * OK, so we check before stripping the double quotes */
         if (strncasecmp(target, "next", strlen("next")) == 0 ||
-            strncasecmp(target, "prev", strlen("prev")) == 0)
+            strncasecmp(target, "prev", strlen("prev")) == 0 ||
+            strncasecmp(target, "back_and_forth", strlen("back_and_forth")) == 0)
             continue;
         if (*target == '"')
             target++;
@@ -807,8 +808,6 @@ void randr_query_outputs() {
         disable_randr(conn);
     }
 
-    ewmh_update_workarea();
-
     /* Just go through each active output and assign one workspace */
     TAILQ_FOREACH(output, &outputs, outputs) {
         if (!output->active)
@@ -845,9 +844,10 @@ void randr_init(int *event_base) {
     const xcb_query_extension_reply_t *extreply;
 
     extreply = xcb_get_extension_data(conn, &xcb_randr_id);
-    if (!extreply->present)
+    if (!extreply->present) {
         disable_randr(conn);
-    else randr_query_outputs();
+        return;
+    } else randr_query_outputs();
 
     if (event_base != NULL)
         *event_base = extreply->first_event;

@@ -450,6 +450,10 @@ focus:
         int count = 0;
         TAILQ_FOREACH(current, &owindows, owindows) {
             Con *ws = con_get_workspace(current->con);
+            /* If no workspace could be found, this was a dock window.
+             * Just skip it, you cannot focus dock windows. */
+            if (!ws)
+                continue;
 
             /* If the container is not on the current workspace,
              * workspace_show() will switch to a different workspace and (if
@@ -719,10 +723,12 @@ border:
 
         TAILQ_FOREACH(current, &owindows, owindows) {
             printf("matching: %p / %s\n", current->con, current->con->name);
+            int border_style = current->con->border_style;
             if ($2 == TOK_TOGGLE) {
-                current->con->border_style++;
-                current->con->border_style %= 3;
-            } else current->con->border_style = $2;
+                border_style++;
+                border_style %= 3;
+            } else border_style = $2;
+            con_set_border_style(current->con, border_style);
         }
 
         tree_render();
@@ -961,6 +967,16 @@ resize:
             while (current->parent->layout == L_STACKED ||
                    current->parent->layout == L_TABBED)
                 current = current->parent;
+
+            /* Then further go up until we find one with the matching orientation. */
+            orientation_t search_orientation =
+                (direction == TOK_LEFT || direction == TOK_RIGHT ? HORIZ : VERT);
+
+            while (current->type != CT_WORKSPACE &&
+                   current->type != CT_FLOATING_CON &&
+                   current->parent->orientation != search_orientation)
+                current = current->parent;
+
             /* get the default percentage */
             int children = con_num_children(current->parent);
             Con *other;

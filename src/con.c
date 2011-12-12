@@ -942,6 +942,49 @@ int con_border_style(Con *con) {
 }
 
 /*
+ * Sets the given border style on con, correctly keeping the position/size of a
+ * floating window.
+ *
+ */
+void con_set_border_style(Con *con, int border_style) {
+    /* Handle the simple case: non-floating containerns */
+    if (!con_is_floating(con)) {
+        con->border_style = border_style;
+        return;
+    }
+
+    /* For floating containers, we want to keep the position/size of the
+     * *window* itself. We first add the border pixels to con->rect to make
+     * con->rect represent the absolute position of the window. Then, we change
+     * the border and subtract the new border pixels. Afterwards, we update
+     * parent->rect to contain con. */
+    DLOG("This is a floating container\n");
+
+    Rect bsr = con_border_style_rect(con);
+    con->rect.x += bsr.x;
+    con->rect.y += bsr.y;
+    con->rect.width += bsr.width;
+    con->rect.height += bsr.height;
+
+    /* Change the border style, get new border/decoration values. */
+    con->border_style = border_style;
+    bsr = con_border_style_rect(con);
+    int deco_height =
+        (con->border_style == BS_NORMAL ? config.font.height + 5 : 0);
+
+    con->rect.x -= bsr.x;
+    con->rect.y -= bsr.y;
+    con->rect.width -= bsr.width;
+    con->rect.height -= bsr.height;
+
+    Con *parent = con->parent;
+    parent->rect.x = con->rect.x;
+    parent->rect.y = con->rect.y - deco_height;
+    parent->rect.width = con->rect.width;
+    parent->rect.height = con->rect.height + deco_height;
+}
+
+/*
  * This function changes the layout of a given container. Use it to handle
  * special cases like changing a whole workspace to stacked/tabbed (creates a
  * new split container before).
@@ -1023,7 +1066,6 @@ static void con_on_remove_child(Con *con) {
             LOG("Closing old workspace (%p / %s), it is empty\n", con, con->name);
             tree_close(con, DONT_KILL_WINDOW, false, false);
             ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE, "{\"change\":\"empty\"}");
-            ewmh_update_workarea();
         }
         return;
     }
