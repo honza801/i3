@@ -436,6 +436,13 @@ restart:
 focus:
     TOK_FOCUS
     {
+        if (focused &&
+            focused->type != CT_WORKSPACE &&
+            focused->fullscreen_mode != CF_NONE) {
+            LOG("Cannot change focus while in fullscreen mode.\n");
+            break;
+        }
+
         owindow *current;
 
         if (match_is_empty(&current_match)) {
@@ -486,6 +493,13 @@ focus:
     }
     | TOK_FOCUS direction
     {
+        if (focused &&
+            focused->type != CT_WORKSPACE &&
+            focused->fullscreen_mode != CF_NONE) {
+            LOG("Cannot change focus while in fullscreen mode.\n");
+            break;
+        }
+
         int direction = $2;
         switch (direction) {
             case TOK_LEFT:
@@ -513,6 +527,13 @@ focus:
     }
     | TOK_FOCUS window_mode
     {
+        if (focused &&
+            focused->type != CT_WORKSPACE &&
+            focused->fullscreen_mode != CF_NONE) {
+            LOG("Cannot change focus while in fullscreen mode.\n");
+            break;
+        }
+
         printf("should focus: ");
 
         if ($2 == TOK_TILING)
@@ -545,6 +566,13 @@ focus:
     }
     | TOK_FOCUS level
     {
+        if (focused &&
+            focused->type != CT_WORKSPACE &&
+            focused->fullscreen_mode != CF_NONE) {
+            LOG("Cannot change focus while in fullscreen mode.\n");
+            break;
+        }
+
         if ($2 == TOK_PARENT)
             level_up();
         else level_down();
@@ -752,20 +780,21 @@ move:
         printf("moving in direction %d\n", direction);
         if (con_is_floating(focused)) {
             printf("floating move with %d pixels\n", px);
+            Rect newrect = focused->parent->rect;
             if (direction == TOK_LEFT) {
-                focused->parent->rect.x -= px;
+                newrect.x -= px;
             } else if (direction == TOK_RIGHT) {
-                focused->parent->rect.x += px;
+                newrect.x += px;
             } else if (direction == TOK_UP) {
-                focused->parent->rect.y -= px;
+                newrect.y -= px;
             } else if (direction == TOK_DOWN) {
-                focused->parent->rect.y += px;
+                newrect.y += px;
             }
+            floating_reposition(focused->parent, newrect);
         } else {
             tree_move(direction);
+            tree_render();
         }
-
-        tree_render();
     }
     | TOK_MOVE TOK_WORKSPACE STR
     {
@@ -908,6 +937,14 @@ layout_mode:
 mark:
     TOK_MARK STR
     {
+        printf("Clearing all windows which have that mark first\n");
+
+        Con *con;
+        TAILQ_FOREACH(con, &all_cons, all_cons) {
+            if (con->mark && strcmp(con->mark, $2) == 0)
+                FREE(con->mark);
+        }
+
         printf("marking window with str %s\n", $2);
         owindow *current;
 
@@ -915,10 +952,8 @@ mark:
 
         TAILQ_FOREACH(current, &owindows, owindows) {
             printf("matching: %p / %s\n", current->con, current->con->name);
-            current->con->mark = sstrdup($2);
+            current->con->mark = $2;
         }
-
-        free($<string>2);
 
         tree_render();
     }
@@ -947,18 +982,19 @@ resize:
             ppt *= -1;
         }
 
-        if (con_is_floating(focused)) {
+        Con *floating_con;
+        if ((floating_con = con_inside_floating(focused))) {
             printf("floating resize\n");
             if (direction == TOK_UP) {
-                focused->parent->rect.y -= px;
-                focused->parent->rect.height += px;
+                floating_con->rect.y -= px;
+                floating_con->rect.height += px;
             } else if (direction == TOK_DOWN) {
-                focused->parent->rect.height += px;
+                floating_con->rect.height += px;
             } else if (direction == TOK_LEFT) {
-                focused->parent->rect.x -= px;
-                focused->parent->rect.width += px;
+                floating_con->rect.x -= px;
+                floating_con->rect.width += px;
             } else {
-                focused->parent->rect.width += px;
+                floating_con->rect.width += px;
             }
         } else {
             LOG("tiling resize\n");
