@@ -613,20 +613,7 @@ void con_move_to_workspace(Con *con, Con *workspace, bool fix_coordinates, bool 
         /* Take the relative coordinates of the current output, then add them
          * to the coordinate space of the correct output */
         if (fix_coordinates && con->type == CT_FLOATING_CON) {
-            DLOG("Floating window, fixing coordinates\n");
-            /* First we get the x/y coordinates relative to the x/y coordinates
-             * of the output on which the window is on */
-            uint32_t rel_x = (con->rect.x - source_output->rect.x);
-            uint32_t rel_y = (con->rect.y - source_output->rect.y);
-            /* Then we calculate a fraction, for example 0.63 for a window
-             * which is at y = 1212 of a 1920 px high output */
-            double fraction_x = ((double)rel_x / source_output->rect.width);
-            double fraction_y = ((double)rel_y / source_output->rect.height);
-            DLOG("rel_x = %d, rel_y = %d, fraction_x = %f, fraction_y = %f, output->w = %d, output->h = %d\n",
-                 rel_x, rel_y, fraction_x, fraction_y, source_output->rect.width, source_output->rect.height);
-            con->rect.x = dest_output->rect.x + (fraction_x * dest_output->rect.width);
-            con->rect.y = dest_output->rect.y + (fraction_y * dest_output->rect.height);
-            DLOG("Resulting coordinates: x = %d, y = %d\n", con->rect.x, con->rect.y);
+            floating_fix_coordinates(con, &(source_output->rect), &(dest_output->rect));
         } else DLOG("Not fixing coordinates, fix_coordinates flag = %d\n", fix_coordinates);
 
         /* If moving to a visible workspace, call show so it can be considered
@@ -656,8 +643,10 @@ void con_move_to_workspace(Con *con, Con *workspace, bool fix_coordinates, bool 
     con_fix_percent(next);
 
     /* 7: focus the con on the target workspace (the X focus is only updated by
-     * calling tree_render(), so for the "real" focus this is a no-op). */
-    con_focus(con_descend_focused(con));
+     * calling tree_render(), so for the "real" focus this is a no-op).
+     * We don’t focus when there is a fullscreen con on that workspace. */
+    if (con_get_fullscreen_con(workspace, CF_OUTPUT) == NULL)
+        con_focus(con_descend_focused(con));
 
     /* 8: when moving to a visible workspace on a different output, we keep the
      * con focused. Otherwise, we leave the focus on the current workspace as we
@@ -806,7 +795,7 @@ Con *con_get_next(Con *con, char way, orientation_t orientation) {
  */
 Con *con_descend_focused(Con *con) {
     Con *next = con;
-    while (!TAILQ_EMPTY(&(next->focus_head)))
+    while (next != focused && !TAILQ_EMPTY(&(next->focus_head)))
         next = TAILQ_FIRST(&(next->focus_head));
     return next;
 }
@@ -823,6 +812,8 @@ Con *con_descend_tiling_focused(Con *con) {
     Con *next = con;
     Con *before;
     Con *child;
+    if (next == focused)
+        return next;
     do {
         before = next;
         TAILQ_FOREACH(child, &(next->focus_head), focused) {
@@ -832,7 +823,7 @@ Con *con_descend_tiling_focused(Con *con) {
             next = child;
             break;
         }
-    } while (before != next);
+    } while (before != next && next != focused);
     return next;
 }
 

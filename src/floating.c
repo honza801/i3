@@ -82,9 +82,17 @@ void floating_enable(Con *con, bool automatic) {
      * otherwise. */
     Con *ws = con_get_workspace(con);
     nc->parent = ws;
+    nc->orientation = NO_ORIENTATION;
+    nc->type = CT_FLOATING_CON;
+    /* We insert nc already, even though its rect is not yet calculated. This
+     * is necessary because otherwise the workspace might be empty (and get
+     * closed in tree_close()) even though it’s not. */
+    TAILQ_INSERT_TAIL(&(ws->floating_head), nc, floating_windows);
+    TAILQ_INSERT_TAIL(&(ws->focus_head), nc, focused);
 
     /* check if the parent container is empty and close it if so */
-    if ((con->parent->type == CT_CON || con->parent->type == CT_FLOATING_CON) && con_num_children(con->parent) == 0) {
+    if ((con->parent->type == CT_CON || con->parent->type == CT_FLOATING_CON) &&
+        con_num_children(con->parent) == 0) {
         DLOG("Old container empty after setting this child to floating, closing\n");
         tree_close(con->parent, DONT_KILL_WINDOW, false, false);
     }
@@ -158,10 +166,6 @@ void floating_enable(Con *con, bool automatic) {
     }
 
     DLOG("Floating rect: (%d, %d) with %d x %d\n", nc->rect.x, nc->rect.y, nc->rect.width, nc->rect.height);
-    nc->orientation = NO_ORIENTATION;
-    nc->type = CT_FLOATING_CON;
-    TAILQ_INSERT_TAIL(&(ws->floating_head), nc, floating_windows);
-    TAILQ_INSERT_TAIL(&(ws->focus_head), nc, focused);
 
     /* 3: attach the child to the new parent container */
     con->parent = nc;
@@ -171,6 +175,14 @@ void floating_enable(Con *con, bool automatic) {
     /* 4: set the border style as specified with new_float */
     if (automatic)
         con->border_style = config.default_floating_border;
+
+    /* 5: Subtract the deco_height in order to make the floating window appear
+     * at precisely the position it specified in its original geometry (which
+     * is what applications might remember). */
+    deco_height = (con->border_style == BS_NORMAL ? config.font.height + 5 : 0);
+    nc->rect.y -= deco_height;
+
+    DLOG("Corrected y = %d (deco_height = %d)\n", nc->rect.y, deco_height);
 
     TAILQ_INSERT_TAIL(&(nc->nodes_head), con, nodes);
     TAILQ_INSERT_TAIL(&(nc->focus_head), con, focused);
@@ -713,6 +725,28 @@ void floating_reposition(Con *con, Rect newrect) {
 
     floating_maybe_reassign_ws(con);
     tree_render();
+}
+
+/*
+ * Fixes the coordinates of the floating window whenever the window gets
+ * reassigned to a different output (or when the output’s rect changes).
+ *
+ */
+void floating_fix_coordinates(Con *con, Rect *old_rect, Rect *new_rect) {
+    DLOG("Fixing coordinates of floating window %p\n", con);
+    /* First we get the x/y coordinates relative to the x/y coordinates
+     * of the output on which the window is on */
+    uint32_t rel_x = (con->rect.x - old_rect->x);
+    uint32_t rel_y = (con->rect.y - old_rect->y);
+    /* Then we calculate a fraction, for example 0.63 for a window
+     * which is at y = 1212 of a 1920 px high output */
+    double fraction_x = ((double)rel_x / old_rect->width);
+    double fraction_y = ((double)rel_y / old_rect->height);
+    DLOG("rel_x = %d, rel_y = %d, fraction_x = %f, fraction_y = %f, output->w = %d, output->h = %d\n",
+         rel_x, rel_y, fraction_x, fraction_y, old_rect->width, old_rect->height);
+    con->rect.x = new_rect->x + (fraction_x * new_rect->width);
+    con->rect.y = new_rect->y + (fraction_y * new_rect->height);
+    DLOG("Resulting coordinates: x = %d, y = %d\n", con->rect.x, con->rect.y);
 }
 
 #if 0
