@@ -1,5 +1,7 @@
 docs/debugging.html
+docs/debugging-release-version.html
 docs/hacking-howto.html
+docs/i3bar-protocol.html
 docs/userguide.html
 docs/bigpicture.png
 docs/single_terminal.png
@@ -17,3 +19,12 @@ docs/keyboard-layer2.png
 docs/testsuite.html
 docs/i3-sync-working.png
 docs/i3-sync.png
+docs/tree-layout1.png
+docs/tree-layout2.png
+docs/tree-shot1.png
+docs/tree-shot2.png
+docs/tree-shot3.png
+docs/tree-shot4.png
+docs/refcard.html
+docs/refcard_style.css
+docs/logo-30.png

@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * main.c: Initialization, main loop
  *
@@ -14,6 +14,8 @@
 #include <sys/un.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include "all.h"
 
 #include "sd-daemon.h"
@@ -22,6 +24,12 @@
  * this before starting any other process, since we set RLIMIT_CORE to
  * RLIM_INFINITY for i3 debugging versions. */
 struct rlimit original_rlimit_core;
+
+/* Whether this version of i3 is a debug build or a release build. */
+bool debug_build = false;
+
+/** The number of file descriptors passed via socket activation. */
+int listen_fds;
 
 static int xkb_event_base;
 
@@ -45,7 +53,13 @@ xcb_timestamp_t last_timestamp = XCB_CURRENT_TIME;
 
 xcb_screen_t *root_screen;
 xcb_window_t root;
+
+/* Color depth, visual id and colormap to use when creating windows and
+ * pixmaps. Will use 32 bit depth and an appropriate visual, if available,
+ * otherwise the root window’s default (usually 24 bit TrueColor). */
 uint8_t root_depth;
+xcb_visualid_t visual_id;
+xcb_colormap_t colormap;
 
 struct ev_loop *main_loop;
 
@@ -198,21 +212,47 @@ static void xkb_got_event(EV_P_ struct ev_io *w, int revents) {
  * Exit handler which destroys the main_loop. Will trigger cleanup handlers.
  *
  */
-static void i3_exit() {
+static void i3_exit(void) {
 /* We need ev >= 4 for the following code. Since it is not *that* important (it
  * only makes sure that there are no i3-nagbar instances left behind) we still
  * support old systems with libev 3. */
 #if EV_VERSION_MAJOR >= 4
     ev_loop_destroy(main_loop);
 #endif
+
+    if (*shmlogname != '\0') {
+        fprintf(stderr, "Closing SHM log \"%s\"\n", shmlogname);
+        fflush(stderr);
+        shm_unlink(shmlogname);
+    }
+}
+
+/*
+ * (One-shot) Handler for all signals with default action "Term", see signal(7)
+ *
+ * Unlinks the SHM log and re-raises the signal.
+ *
+ */
+static void handle_signal(int sig, siginfo_t *info, void *data) {
+    fprintf(stderr, "Received signal %d, terminating\n", sig);
+    if (*shmlogname != '\0') {
+        fprintf(stderr, "Closing SHM log \"%s\"\n", shmlogname);
+        shm_unlink(shmlogname);
+    }
+    fflush(stderr);
+    raise(sig);
 }
 
 int main(int argc, char *argv[]) {
+    /* Keep a symbol pointing to the I3_VERSION string constant so that we have
+     * it in gdb backtraces. */
+    const char *i3_version = I3_VERSION;
     char *override_configpath = NULL;
     bool autostart = true;
     char *layout_path = NULL;
     bool delete_layout_path = false;
     bool force_xinerama = false;
+    char *fake_outputs = NULL;
     bool disable_signalhandler = false;
     static struct option long_options[] = {
         {"no-autostart", no_argument, 0, 'a'},
@@ -224,11 +264,16 @@ int main(int argc, char *argv[]) {
         {"force-xinerama", no_argument, 0, 0},
         {"force_xinerama", no_argument, 0, 0},
         {"disable-signalhandler", no_argument, 0, 0},
+        {"shmlog-size", required_argument, 0, 0},
+        {"shmlog_size", required_argument, 0, 0},
         {"get-socketpath", no_argument, 0, 0},
         {"get_socketpath", no_argument, 0, 0},
+        {"fake_outputs", required_argument, 0, 0},
+        {"fake-outputs", required_argument, 0, 0},
         {0, 0, 0, 0}
     };
     int option_index = 0, opt;
+    xcb_void_cookie_t colormap_cookie;
 
     setlocale(LC_ALL, "");
 
@@ -242,7 +287,20 @@ int main(int argc, char *argv[]) {
 
     srand(time(NULL));
 
+    /* Init logging *before* initializing debug_build to guarantee early
+     * (file) logging. */
     init_logging();
+
+    /* i3_version contains either something like this:
+     *     "4.0.2 (2011-11-11, branch "release")".
+     * or: "4.0.2-123-gCOFFEEBABE (2011-11-11, branch "next")".
+     *
+     * So we check for the offset of the first opening round bracket to
+     * determine whether this is a git version or a release version. */
+    debug_build = ((strchr(i3_version, '(') - i3_version) > 10);
+
+    /* On non-release builds, disable SHM logging by default. */
+    shmlog_size = (debug_build ? 25 * 1024 * 1024 : 0);
 
     start_argv = argv;
 
@@ -266,7 +324,7 @@ int main(int argc, char *argv[]) {
                 only_check_config = true;
                 break;
             case 'v':
-                printf("i3 version " I3_VERSION " © 2009-2011 Michael Stapelberg and contributors\n");
+                printf("i3 version " I3_VERSION " © 2009-2012 Michael Stapelberg and contributors\n");
                 exit(EXIT_SUCCESS);
             case 'V':
                 set_verbosity(true);
@@ -293,17 +351,30 @@ int main(int argc, char *argv[]) {
                     break;
                 } else if (strcmp(long_options[option_index].name, "get-socketpath") == 0 ||
                            strcmp(long_options[option_index].name, "get_socketpath") == 0) {
-                    char *socket_path = socket_path_from_x11();
+                    char *socket_path = root_atom_contents("I3_SOCKET_PATH");
                     if (socket_path) {
                         printf("%s\n", socket_path);
                         return 0;
                     }
 
                     return 1;
+                } else if (strcmp(long_options[option_index].name, "shmlog-size") == 0 ||
+                           strcmp(long_options[option_index].name, "shmlog_size") == 0) {
+                    shmlog_size = atoi(optarg);
+                    /* Re-initialize logging immediately to get as many
+                     * logmessages as possible into the SHM log. */
+                    init_logging();
+                    LOG("Limiting SHM log size to %d bytes\n", shmlog_size);
+                    break;
                 } else if (strcmp(long_options[option_index].name, "restart") == 0) {
                     FREE(layout_path);
                     layout_path = sstrdup(optarg);
                     delete_layout_path = true;
+                    break;
+                } else if (strcmp(long_options[option_index].name, "fake-outputs") == 0 ||
+                           strcmp(long_options[option_index].name, "fake_outputs") == 0) {
+                    LOG("Initializing fake outputs: %s\n", optarg);
+                    fake_outputs = sstrdup(optarg);
                     break;
                 }
                 /* fall-through */
@@ -325,6 +396,11 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "\n");
                 fprintf(stderr, "\t--get-socketpath\n"
                                 "\tRetrieve the i3 IPC socket path from X11, print it, then exit.\n");
+                fprintf(stderr, "\n");
+                fprintf(stderr, "\t--shmlog-size <limit>\n"
+                                "\tLimits the size of the i3 SHM log to <limit> bytes. Setting this\n"
+                                "\tto 0 disables SHM logging entirely.\n"
+                                "\tThe default is %d bytes.\n", shmlog_size);
                 fprintf(stderr, "\n");
                 fprintf(stderr, "If you pass plain text arguments, i3 will interpret them as a command\n"
                                 "to send to a currently running i3 (like i3-msg). This allows you to\n"
@@ -361,7 +437,7 @@ int main(int argc, char *argv[]) {
             optind++;
         }
         LOG("Command is: %s (%d bytes)\n", payload, strlen(payload));
-        char *socket_path = socket_path_from_x11();
+        char *socket_path = root_atom_contents("I3_SOCKET_PATH");
         if (!socket_path) {
             ELOG("Could not get i3 IPC socket path\n");
             return 1;
@@ -395,13 +471,11 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    /* I3_VERSION contains either something like this:
-     *     "4.0.2 (2011-11-11, branch "release")".
-     * or: "4.0.2-123-gCOFFEEBABE (2011-11-11, branch "next")".
-     *
-     * So we check for the offset of the first opening round bracket to
-     * determine whether this is a git version or a release version. */
-    if ((strchr(I3_VERSION, '(') - I3_VERSION) > 10) {
+    /* Enable logging to handle the case when the user did not specify --shmlog-size */
+    init_logging();
+
+    /* Try to enable core dumps by default when running a debug build */
+    if (debug_build) {
         struct rlimit limit = { RLIM_INFINITY, RLIM_INFINITY };
         setrlimit(RLIMIT_CORE, &limit);
 
@@ -438,7 +512,17 @@ int main(int argc, char *argv[]) {
 
     root_screen = xcb_aux_get_screen(conn, conn_screen);
     root = root_screen->root;
+
+    /* By default, we use the same depth and visual as the root window, which
+     * usually is TrueColor (24 bit depth) and the corresponding visual.
+     * However, we also check if a 32 bit depth and visual are available (for
+     * transparency) and use it if so. */
     root_depth = root_screen->root_depth;
+    visual_id = root_screen->root_visual;
+    colormap = root_screen->default_colormap;
+
+    DLOG("root_depth = %d, visual_id = 0x%08x.\n", root_depth, visual_id);
+
     xcb_get_geometry_cookie_t gcookie = xcb_get_geometry(conn, root);
     xcb_query_pointer_cookie_t pointercookie = xcb_query_pointer(conn, root);
 
@@ -467,6 +551,20 @@ int main(int argc, char *argv[]) {
     xcb_void_cookie_t cookie;
     cookie = xcb_change_window_attributes_checked(conn, root, mask, values);
     check_error(conn, cookie, "Another window manager seems to be running");
+
+    /* By now we already checked for replies once, so let’s see if colormap
+     * creation worked (if requested). */
+    if (colormap != root_screen->default_colormap) {
+        xcb_generic_error_t *error = xcb_request_check(conn, colormap_cookie);
+        if (error != NULL) {
+            ELOG("Could not create ColorMap for 32 bit visual, falling back to X11 default.\n");
+            root_depth = root_screen->root_depth;
+            visual_id = root_screen->root_visual;
+            colormap = root_screen->default_colormap;
+            DLOG("root_depth = %d, visual_id = 0x%08x.\n", root_depth, visual_id);
+            free(error);
+        }
+    }
 
     xcb_get_geometry_reply_t *greply = xcb_get_geometry_reply(conn, gcookie, NULL);
     if (greply == NULL) {
@@ -566,10 +664,18 @@ int main(int argc, char *argv[]) {
 
     free(greply);
 
-    /* Force Xinerama (for drivers which don't support RandR yet, esp. the
-     * nVidia binary graphics driver), when specified either in the config
-     * file or on command-line */
-    if (force_xinerama || config.force_xinerama) {
+    /* Setup fake outputs for testing */
+    if (fake_outputs == NULL && config.fake_outputs != NULL)
+        fake_outputs = config.fake_outputs;
+
+    if (fake_outputs != NULL) {
+        fake_outputs_init(fake_outputs);
+        FREE(fake_outputs);
+        config.fake_outputs = NULL;
+    } else if (force_xinerama || config.force_xinerama) {
+        /* Force Xinerama (for drivers which don't support RandR yet, esp. the
+         * nVidia binary graphics driver), when specified either in the config
+         * file or on command-line */
         xinerama_init();
     } else {
         DLOG("Checking for XRandR...\n");
@@ -606,15 +712,29 @@ int main(int argc, char *argv[]) {
         ev_io_start(main_loop, ipc_io);
     }
 
-    /* Also handle the UNIX domain sockets passed via socket activation */
-    int fds = sd_listen_fds(1);
-    if (fds < 0)
+    /* Also handle the UNIX domain sockets passed via socket activation. The
+     * parameter 1 means "remove the environment variables", we don’t want to
+     * pass these to child processes. */
+    listen_fds = sd_listen_fds(0);
+    if (listen_fds < 0)
         ELOG("socket activation: Error in sd_listen_fds\n");
-    else if (fds == 0)
+    else if (listen_fds == 0)
         DLOG("socket activation: no sockets passed\n");
     else {
-        for (int fd = SD_LISTEN_FDS_START; fd < (SD_LISTEN_FDS_START + fds); fd++) {
+        int flags;
+        for (int fd = SD_LISTEN_FDS_START;
+             fd < (SD_LISTEN_FDS_START + listen_fds);
+             fd++) {
             DLOG("socket activation: also listening on fd %d\n", fd);
+
+            /* sd_listen_fds() enables FD_CLOEXEC by default.
+             * However, we need to keep the file descriptors open for in-place
+             * restarting, therefore we explicitly disable FD_CLOEXEC. */
+            if ((flags = fcntl(fd, F_GETFD)) < 0 ||
+                fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC) < 0) {
+                ELOG("Could not disable FD_CLOEXEC on fd %d\n", fd);
+            }
+
             struct ev_io *ipc_io = scalloc(sizeof(struct ev_io));
             ev_io_init(ipc_io, ipc_new_client, fd, EV_READ);
             ev_io_start(main_loop, ipc_io);
@@ -651,8 +771,31 @@ int main(int argc, char *argv[]) {
 
     manage_existing_windows(root);
 
+    struct sigaction action;
+
+    action.sa_sigaction = handle_signal;
+    action.sa_flags = SA_NODEFER | SA_RESETHAND | SA_SIGINFO;
+    sigemptyset(&action.sa_mask);
+
     if (!disable_signalhandler)
         setup_signal_handler();
+    else {
+        /* Catch all signals with default action "Core", see signal(7) */
+        if (sigaction(SIGQUIT, &action, NULL) == -1 ||
+            sigaction(SIGILL, &action, NULL) == -1 ||
+            sigaction(SIGABRT, &action, NULL) == -1 ||
+            sigaction(SIGFPE, &action, NULL) == -1 ||
+            sigaction(SIGSEGV, &action, NULL) == -1)
+            ELOG("Could not setup signal handler");
+    }
+
+    /* Catch all signals with default action "Term", see signal(7) */
+    if (sigaction(SIGHUP, &action, NULL) == -1 ||
+        sigaction(SIGINT, &action, NULL) == -1 ||
+        sigaction(SIGALRM, &action, NULL) == -1 ||
+        sigaction(SIGUSR1, &action, NULL) == -1 ||
+        sigaction(SIGUSR2, &action, NULL) == -1)
+        ELOG("Could not setup signal handler");
 
     /* Ignore SIGPIPE to survive errors when an IPC client disconnects
      * while we are sending him a message */
@@ -678,8 +821,9 @@ int main(int argc, char *argv[]) {
     Barconfig *barconfig;
     TAILQ_FOREACH(barconfig, &barconfigs, configs) {
         char *command = NULL;
-        sasprintf(&command, "i3bar --bar_id=%s --socket=\"%s\"",
-                  barconfig->id, current_socketpath);
+        sasprintf(&command, "%s --bar_id=%s --socket=\"%s\"",
+                barconfig->i3bar_command ? barconfig->i3bar_command : "i3bar",
+                barconfig->id, current_socketpath);
         LOG("Starting bar process: %s\n", command);
         start_application(command, true);
         free(command);

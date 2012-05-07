@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * config.c: Configuration file (calling the parser (src/cfgparse.y) with the
  *           correct path, switching key bindings mode).
@@ -81,7 +81,7 @@ Binding *get_binding(uint16_t modifiers, xcb_keycode_t keycode) {
  * Translates keysymbols to keycodes for all bindings which use keysyms.
  *
  */
-void translate_keysyms() {
+void translate_keysyms(void) {
     Binding *bind;
     xcb_keysym_t keysym;
     int col;
@@ -237,7 +237,7 @@ static char *get_config_path(const char *override_configpath) {
 
     die("Unable to find the configuration file (looked at "
             "~/.i3/config, $XDG_CONFIG_HOME/i3/config, "
-            SYSCONFDIR "i3/config and $XDG_CONFIG_DIRS/i3/config)");
+            SYSCONFDIR "/i3/config and $XDG_CONFIG_DIRS/i3/config)");
 }
 
 /*
@@ -248,7 +248,7 @@ static char *get_config_path(const char *override_configpath) {
  */
 static void parse_configuration(const char *override_configpath) {
     char *path = get_config_path(override_configpath);
-    DLOG("Parsing configfile %s\n", path);
+    LOG("Parsing configfile %s\n", path);
     FREE(current_configpath);
     current_configpath = path;
     parse_file(path);
@@ -307,17 +307,22 @@ void load_configuration(xcb_connection_t *conn, const char *override_configpath,
             FREE(barconfig->tray_output);
             FREE(barconfig->socket_path);
             FREE(barconfig->status_command);
+            FREE(barconfig->i3bar_command);
             FREE(barconfig->font);
             FREE(barconfig->colors.background);
             FREE(barconfig->colors.statusline);
-            FREE(barconfig->colors.focused_workspace_text);
+            FREE(barconfig->colors.focused_workspace_border);
             FREE(barconfig->colors.focused_workspace_bg);
-            FREE(barconfig->colors.active_workspace_text);
+            FREE(barconfig->colors.focused_workspace_text);
+            FREE(barconfig->colors.active_workspace_border);
             FREE(barconfig->colors.active_workspace_bg);
-            FREE(barconfig->colors.inactive_workspace_text);
+            FREE(barconfig->colors.active_workspace_text);
+            FREE(barconfig->colors.inactive_workspace_border);
             FREE(barconfig->colors.inactive_workspace_bg);
-            FREE(barconfig->colors.urgent_workspace_text);
+            FREE(barconfig->colors.inactive_workspace_text);
+            FREE(barconfig->colors.urgent_workspace_border);
             FREE(barconfig->colors.urgent_workspace_bg);
+            FREE(barconfig->colors.urgent_workspace_text);
             TAILQ_REMOVE(&barconfigs, barconfig, configs);
             FREE(barconfig);
         }
@@ -328,6 +333,14 @@ void load_configuration(xcb_connection_t *conn, const char *override_configpath,
         TAILQ_FOREACH(ws, workspaces, workspaces)
             workspace_set_name(ws, NULL);
 #endif
+
+        /* Invalidate pixmap caches in case font or colors changed */
+        Con *con;
+        TAILQ_FOREACH(con, &all_cons, all_cons)
+            FREE(con->deco_render_params);
+
+        /* Get rid of the current font */
+        free_font();
     }
 
     SLIST_INIT(&modes);
@@ -348,21 +361,24 @@ void load_configuration(xcb_connection_t *conn, const char *override_configpath,
     memset(&config, 0, sizeof(config));
 
     /* Initialize default colors */
-#define INIT_COLOR(x, cborder, cbackground, ctext) \
+#define INIT_COLOR(x, cborder, cbackground, ctext, cindicator) \
     do { \
         x.border = get_colorpixel(cborder); \
         x.background = get_colorpixel(cbackground); \
         x.text = get_colorpixel(ctext); \
+        x.indicator = get_colorpixel(cindicator); \
     } while (0)
 
     config.client.background = get_colorpixel("#000000");
-    INIT_COLOR(config.client.focused, "#4c7899", "#285577", "#ffffff");
-    INIT_COLOR(config.client.focused_inactive, "#333333", "#5f676a", "#ffffff");
-    INIT_COLOR(config.client.unfocused, "#333333", "#222222", "#888888");
-    INIT_COLOR(config.client.urgent, "#2f343a", "#900000", "#ffffff");
-    INIT_COLOR(config.bar.focused, "#4c7899", "#285577", "#ffffff");
-    INIT_COLOR(config.bar.unfocused, "#333333", "#222222", "#888888");
-    INIT_COLOR(config.bar.urgent, "#2f343a", "#900000", "#ffffff");
+    INIT_COLOR(config.client.focused, "#4c7899", "#285577", "#ffffff", "#2e9ef4");
+    INIT_COLOR(config.client.focused_inactive, "#333333", "#5f676a", "#ffffff", "#484e50");
+    INIT_COLOR(config.client.unfocused, "#333333", "#222222", "#888888", "#292d2e");
+    INIT_COLOR(config.client.urgent, "#2f343a", "#900000", "#ffffff", "#900000");
+
+    /* the last argument (indicator color) is ignored for bar colors */
+    INIT_COLOR(config.bar.focused, "#4c7899", "#285577", "#ffffff", "#000000");
+    INIT_COLOR(config.bar.unfocused, "#333333", "#222222", "#888888", "#000000");
+    INIT_COLOR(config.bar.urgent, "#2f343a", "#900000", "#ffffff", "#000000");
 
     config.default_border = BS_NORMAL;
     config.default_floating_border = BS_NORMAL;
@@ -380,6 +396,14 @@ void load_configuration(xcb_connection_t *conn, const char *override_configpath,
     if (config.font.id == 0) {
         ELOG("You did not specify required configuration option \"font\"\n");
         config.font = load_font("fixed", true);
+        set_font(&config.font);
+    }
+
+    /* Redraw the currently visible decorations on reload, so that
+     * the possibly new drawing parameters changed. */
+    if (reload) {
+        x_deco_recurse(croot);
+        xcb_flush(conn);
     }
 
 #if 0

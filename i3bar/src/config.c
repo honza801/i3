@@ -15,6 +15,8 @@
 #include <yajl/yajl_parse.h>
 #include <yajl/yajl_version.h>
 
+#include <X11/Xlib.h>
+
 #include "common.h"
 
 static char *cur_key;
@@ -65,13 +67,48 @@ static int config_string_cb(void *params_, const unsigned char *val, size_t _len
 static int config_string_cb(void *params_, const unsigned char *val, unsigned int _len) {
 #endif
     int len = (int)_len;
-    /* The id is ignored, we already have it in config.bar_id */
-    if (!strcmp(cur_key, "id"))
+    /* The id and socket_path are ignored, we already know them. */
+    if (!strcmp(cur_key, "id") || !strcmp(cur_key, "socket_path"))
         return 1;
 
     if (!strcmp(cur_key, "mode")) {
         DLOG("mode = %.*s, len = %d\n", len, val, len);
         config.hide_on_modifier = (len == 4 && !strncmp((const char*)val, "hide", strlen("hide")));
+        return 1;
+    }
+
+    if (!strcmp(cur_key, "modifier")) {
+        DLOG("modifier = %.*s\n", len, val);
+        if (len == 5 && !strncmp((const char*)val, "shift", strlen("shift"))) {
+            config.modifier = ShiftMask;
+            return 1;
+        }
+        if (len == 4 && !strncmp((const char*)val, "ctrl", strlen("ctrl"))) {
+            config.modifier = ControlMask;
+            return 1;
+        }
+        if (len == 4 && !strncmp((const char*)val, "Mod", strlen("Mod"))) {
+            switch (val[3]) {
+                case '1':
+                    config.modifier = Mod1Mask;
+                    return 1;
+                case '2':
+                    config.modifier = Mod2Mask;
+                    return 1;
+                case '3':
+                    config.modifier = Mod3Mask;
+                    return 1;
+                /*
+                case '4':
+                    config.modifier = Mod4Mask;
+                    return 1;
+                */
+                case '5':
+                    config.modifier = Mod5Mask;
+                    return 1;
+            }
+        }
+        config.modifier = Mod4Mask;
         return 1;
     }
 
@@ -124,14 +161,18 @@ static int config_string_cb(void *params_, const unsigned char *val, unsigned in
 
     COLOR(statusline, bar_fg);
     COLOR(background, bar_bg);
-    COLOR(focused_workspace_text, focus_ws_fg);
+    COLOR(focused_workspace_border, focus_ws_border);
     COLOR(focused_workspace_bg, focus_ws_bg);
-    COLOR(active_workspace_text, active_ws_fg);
+    COLOR(focused_workspace_text, focus_ws_fg);
+    COLOR(active_workspace_border, active_ws_border);
     COLOR(active_workspace_bg, active_ws_bg);
-    COLOR(inactive_workspace_text, inactive_ws_fg);
+    COLOR(active_workspace_text, active_ws_fg);
+    COLOR(inactive_workspace_border, inactive_ws_border);
     COLOR(inactive_workspace_bg, inactive_ws_bg);
-    COLOR(urgent_workspace_text, urgent_ws_fg);
+    COLOR(inactive_workspace_text, inactive_ws_fg);
+    COLOR(urgent_workspace_border, urgent_ws_border);
     COLOR(urgent_workspace_bg, urgent_ws_bg);
+    COLOR(urgent_workspace_text, urgent_ws_fg);
 
     printf("got unexpected string %.*s for cur_key = %s\n", len, val, cur_key);
 
@@ -221,12 +262,16 @@ void free_colors(struct xcb_color_strings_t *colors) {
     FREE_COLOR(bar_bg);
     FREE_COLOR(active_ws_fg);
     FREE_COLOR(active_ws_bg);
+    FREE_COLOR(active_ws_border);
     FREE_COLOR(inactive_ws_fg);
     FREE_COLOR(inactive_ws_bg);
+    FREE_COLOR(inactive_ws_border);
     FREE_COLOR(urgent_ws_fg);
     FREE_COLOR(urgent_ws_bg);
+    FREE_COLOR(urgent_ws_border);
     FREE_COLOR(focus_ws_fg);
     FREE_COLOR(focus_ws_bg);
+    FREE_COLOR(focus_ws_border);
 #undef FREE_COLOR
 }
 

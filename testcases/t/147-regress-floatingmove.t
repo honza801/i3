@@ -4,40 +4,33 @@
 # Regression test for moving a con outside of a floating con when there are no
 # tiling cons on a workspace
 #
-use X11::XCB qw(:all);
-use Time::HiRes qw(sleep);
 use i3test;
 
-BEGIN {
-    use_ok('X11::XCB::Window');
+sub sync_cmd {
+    cmd @_;
+    sync_with_i3;
 }
-
-my $x = X11::XCB::Connection->new;
 
 my $tmp = fresh_workspace;
 
-my $left = open_window($x);
-my $mid = open_window($x);
-my $right = open_window($x);
+my $left = open_window;
+my $mid = open_window;
+my $right = open_window;
 
 # go to workspace level
-cmd 'level up';
-sleep 0.25;
+sync_cmd 'level up';
 
 # make it floating
-cmd 'mode toggle';
-sleep 0.25;
+sync_cmd 'mode toggle';
 
 # move the con outside the floating con
-cmd 'move before v';
-sleep 0.25;
+sync_cmd 'move up';
 
 does_i3_live;
 
 # move another con outside
-cmd '[id="' . $mid->id . '"] focus';
-cmd 'move before v';
-sleep 0.25;
+sync_cmd '[id="' . $mid->id . '"] focus';
+sync_cmd 'move up';
 
 does_i3_live;
 

@@ -4,33 +4,24 @@
 # Regression test for correct focus behaviour when moving a floating con to
 # another workspace.
 #
-use X11::XCB qw(:all);
 use i3test;
-
-BEGIN {
-    use_ok('X11::XCB::Window');
-}
-
-my $x = X11::XCB::Connection->new;
 
 my $tmp = fresh_workspace;
 
 # open a tiling window on the first workspace
-open_window($x);
-#sleep 0.25;
+open_window;
 my $first = get_focused($tmp);
 
 # on a different ws, open a floating window
 my $otmp = fresh_workspace;
-open_window($x);
-#sleep 0.25;
+open_window;
 my $float = get_focused($otmp);
 cmd 'mode toggle';
-#sleep 0.25;
+sync_with_i3;
 
 # move the floating con to first workspace
 cmd "move workspace $tmp";
-#sleep 0.25;
+sync_with_i3;
 
 # switch to the first ws and check focus
 is(get_focused($tmp), $float, 'floating client correctly focused');

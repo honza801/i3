@@ -4,6 +4,11 @@
 DPKG_EXPORT_BUILDFLAGS = 1
 -include /usr/share/dpkg/buildflags.mk
 
+ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+    NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+    MAKEFLAGS += -j$(NUMJOBS)
+endif
+
 build: build-arch build-indep
 build-arch: build-stamp
 build-indep: build-stamp
@@ -31,6 +36,9 @@ override_dh_auto_build:
 	$(MAKE)
 	$(MAKE) -C man
 	$(MAKE) -C docs
+
+override_dh_installchangelogs:
+	dh_installchangelogs RELEASE-NOTES-4.2
 
 override_dh_install:
 	$(MAKE) DESTDIR=$(CURDIR)/debian/i3-wm/ install

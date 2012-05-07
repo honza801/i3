@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * xcb.c: Helper functions for easier usage of XCB
  *
@@ -56,8 +56,8 @@ extern unsigned int xcb_numlock_mask;
  * generating an ID and checking for errors.
  *
  */
-xcb_window_t create_window(xcb_connection_t *conn, Rect r, uint16_t window_class,
-        enum xcursor_cursor_t cursor, bool map, uint32_t mask, uint32_t *values);
+xcb_window_t create_window(xcb_connection_t *conn, Rect r, uint16_t depth, xcb_visualid_t visual,
+        uint16_t window_class, enum xcursor_cursor_t cursor, bool map, uint32_t mask, uint32_t *values);
 
 /**
  * Draws a line from x,y to to_x,to_y using the given color
@@ -95,13 +95,6 @@ void send_take_focus(xcb_window_t window);
 void xcb_raise_window(xcb_connection_t *conn, xcb_window_t window);
 
 /**
- * Calculate the width of the given text (16-bit characters, UCS) with given
- * real length (amount of glyphs) using the given font.
- *
- */
-int predict_text_width(char *text, int length);
-
-/**
  * Configures the given window to have the size/position specified by given rect
  *
  */
@@ -123,5 +116,17 @@ void xcb_warp_pointer_rect(xcb_connection_t *conn, Rect *rect);
  *
  */
 void xcb_set_root_cursor(int cursor);
+
+/**
+ * Get depth of visual specified by visualid
+ *
+ */
+uint16_t get_visual_depth(xcb_visualid_t visual_id);
+
+/**
+ * Get visualid with specified depth
+ *
+ */
+xcb_visualid_t get_visualid_by_depth(uint16_t depth);
 
 #endif

@@ -26,6 +26,14 @@
  */
 Con *workspace_get(const char *num, bool *created);
 
+/*
+ * Returns a pointer to a new workspace in the given output. The workspace
+ * is created attached to the tree hierarchy through the given content
+ * container.
+ *
+ */
+Con *create_workspace_on_output(Output *output, Con *content);
+
 #if 0
 /**
  * Sets the name (or just its number) for the given workspace. This has to
@@ -61,19 +69,31 @@ void workspace_show_by_name(const char *num);
  * Returns the next workspace.
  *
  */
-Con* workspace_next();
+Con* workspace_next(void);
 
 /**
  * Returns the previous workspace.
  *
  */
-Con* workspace_prev();
+Con* workspace_prev(void);
+
+/**
+ * Returns the next workspace on the same output
+ *
+ */
+Con* workspace_next_on_output(void);
+
+/**
+ * Returns the previous workspace on the same output
+ *
+ */
+Con* workspace_prev_on_output(void);
 
 /**
  * Focuses the previously focused workspace.
  *
  */
-void workspace_back_and_forth();
+void workspace_back_and_forth(void);
 
 
 #if 0

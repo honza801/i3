@@ -1,12 +1,20 @@
 # To pass additional parameters for asciidoc
 ASCIIDOC=asciidoc
 
-all: hacking-howto.html debugging.html userguide.html ipc.html multi-monitor.html wsbar.html refcard.pdf testsuite.html
+ASCIIDOC_TARGETS:=hacking-howto.html debugging.html debugging-release-version.html userguide.html ipc.html multi-monitor.html wsbar.html testsuite.html i3bar-protocol.html
+
+all: ${ASCIIDOC_TARGETS}
 
 hacking-howto.html: hacking-howto
 	$(ASCIIDOC) -a toc -n $<
 
+i3bar-protocol.html: i3bar-protocol
+	$(ASCIIDOC) -a toc -n $<
+
 debugging.html: debugging
+	$(ASCIIDOC) -n $<
+
+debugging-release-version.html: debugging-release-version
 	$(ASCIIDOC) -n $<
 
 userguide.html: userguide
@@ -24,8 +32,5 @@ multi-monitor.html: multi-monitor
 wsbar.html: wsbar
 	$(ASCIIDOC) -a toc -n $<
 
-refcard.pdf: refcard.tex
-	pdflatex refcard.tex && pdflatex refcard.tex
-
 clean:
-	find . -regex ".*\.\(aux\|out\|log\|toc\|bm\|pdf\|dvi\|log\|html\)" -exec rm '{}' \;
+	rm -f ${ASCIIDOC_TARGETS}

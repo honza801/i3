@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (socket_path == NULL)
-        socket_path = socket_path_from_x11();
+        socket_path = root_atom_contents("I3_SOCKET_PATH");
 
     /* Fall back to the default socket path */
     if (socket_path == NULL)

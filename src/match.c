@@ -13,6 +13,12 @@
  */
 #include "all.h"
 
+/* From sys/time.h, not sure if it’s available on all systems. */
+# define _i3_timercmp(a, b, CMP)                                                  \
+  (((a).tv_sec == (b).tv_sec) ?                                             \
+   ((a).tv_usec CMP (b).tv_usec) :                                          \
+   ((a).tv_sec CMP (b).tv_sec))
+
 /*
  * Initializes the Match data structure. This function is necessary because the
  * members representing boolean values (like dock) need to be initialized with
@@ -22,6 +28,7 @@
 void match_init(Match *match) {
     memset(match, 0, sizeof(Match));
     match->dock = -1;
+    match->urgent = U_DONTCHECK;
 }
 
 /*
@@ -39,6 +46,7 @@ bool match_is_empty(Match *match) {
             match->class == NULL &&
             match->instance == NULL &&
             match->role == NULL &&
+            match->urgent == U_DONTCHECK &&
             match->id == XCB_NONE &&
             match->con_id == NULL &&
             match->dock == -1 &&
@@ -118,6 +126,38 @@ bool match_matches_window(Match *match, i3Window *window) {
         } else {
             return false;
         }
+    }
+
+    Con *con = NULL;
+    if (match->urgent == U_LATEST) {
+        /* if the window isn't urgent, no sense in searching */
+        if (window->urgent.tv_sec == 0) {
+            return false;
+        }
+        /* if we find a window that is newer than this one, bail */
+        TAILQ_FOREACH(con, &all_cons, all_cons) {
+            if ((con->window != NULL) &&
+                _i3_timercmp(con->window->urgent, window->urgent, >)) {
+                return false;
+            }
+        }
+        LOG("urgent matches latest\n");
+    }
+
+    if (match->urgent == U_OLDEST) {
+        /* if the window isn't urgent, no sense in searching */
+        if (window->urgent.tv_sec == 0) {
+            return false;
+        }
+        /* if we find a window that is older than this one (and not 0), bail */
+        TAILQ_FOREACH(con, &all_cons, all_cons) {
+            if ((con->window != NULL) &&
+                (con->window->urgent.tv_sec != 0) &&
+                _i3_timercmp(con->window->urgent, window->urgent, <)) {
+                return false;
+            }
+        }
+        LOG("urgent matches oldest\n");
     }
 
     if (match->dock != -1) {

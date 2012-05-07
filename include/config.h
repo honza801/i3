@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * include/config.h: Contains all structs/variables for the configurable
  * part of i3 as well as functions handling the configuration file (calling
@@ -54,6 +54,7 @@ struct Colortriple {
     uint32_t border;
     uint32_t background;
     uint32_t text;
+    uint32_t indicator;
 };
 
 /**
@@ -133,6 +134,9 @@ struct Config {
      * is fetched once and never updated. */
     bool force_xinerama;
 
+    /** Overwrites output detection (for testing), see src/fake_outputs.c */
+    char *fake_outputs;
+
     /** Automatic workspace back and forth switching. If this is set, a
      * switch to the currently active workspace will switch to the
      * previously focused one instead, making it possible to fast toggle
@@ -151,6 +155,12 @@ struct Config {
     /** The modifier which needs to be pressed in combination with your mouse
      * buttons to do things with floating windows (move, resize) */
     uint32_t floating_modifier;
+
+    /** Maximum and minimum dimensions of a floating window */
+    int32_t floating_maximum_width;
+    int32_t floating_maximum_height;
+    int32_t floating_minimum_width;
+    int32_t floating_minimum_height;
 
     /* Color codes are stored here */
     struct config_client {
@@ -201,8 +211,25 @@ struct Barconfig {
     /** Bar display mode (hide unless modifier is pressed or show in dock mode) */
     enum { M_DOCK = 0, M_HIDE = 1 } mode;
 
+    /** Bar modifier (to show bar when in hide mode). */
+    enum {
+        M_NONE = 0,
+        M_CONTROL = 1,
+        M_SHIFT = 2,
+        M_MOD1 = 3,
+        M_MOD2 = 4,
+        M_MOD3 = 5,
+        M_MOD4 = 6,
+        M_MOD5 = 7
+    } modifier;
+
     /** Bar position (bottom by default). */
     enum { P_BOTTOM = 0, P_TOP = 1 } position;
+
+    /** Command that should be run to execute i3bar, give a full path if i3bar is not
+     * in your $PATH.
+     * By default just 'i3bar' is executed. */
+    char *i3bar_command;
 
     /** Command that should be run to get a statusline, for example 'i3status'.
      * Will be passed to the shell. */
@@ -223,17 +250,21 @@ struct Barconfig {
         char *background;
         char *statusline;
 
-        char *focused_workspace_text;
+        char *focused_workspace_border;
         char *focused_workspace_bg;
+        char *focused_workspace_text;
 
-        char *active_workspace_text;
+        char *active_workspace_border;
         char *active_workspace_bg;
+        char *active_workspace_text;
 
-        char *inactive_workspace_text;
+        char *inactive_workspace_border;
         char *inactive_workspace_bg;
+        char *inactive_workspace_text;
 
-        char *urgent_workspace_text;
+        char *urgent_workspace_border;
         char *urgent_workspace_bg;
+        char *urgent_workspace_text;
     } colors;
 
     TAILQ_ENTRY(Barconfig) configs;
@@ -252,7 +283,7 @@ void load_configuration(xcb_connection_t *conn, const char *override_configfile,
  * Translates keysymbols to keycodes for all bindings which use keysyms.
  *
  */
-void translate_keysyms();
+void translate_keysyms(void);
 
 /**
  * Ungrabs all keys, to be called before re-grabbing the keys because of a

@@ -85,23 +85,60 @@ static con_state *state_for_frame(xcb_window_t window) {
  * every container from con_new().
  *
  */
-void x_con_init(Con *con) {
+void x_con_init(Con *con, uint16_t depth) {
     /* TODO: maybe create the window when rendering first? we could then even
      * get the initial geometry right */
 
     uint32_t mask = 0;
-    uint32_t values[2];
+    uint32_t values[5];
 
-    /* our own frames should not be managed */
-    mask |= XCB_CW_OVERRIDE_REDIRECT;
-    values[0] = 1;
+    xcb_visualid_t visual = XCB_COPY_FROM_PARENT;
+    xcb_colormap_t win_colormap = XCB_NONE;
+    if (depth != root_depth && depth != XCB_COPY_FROM_PARENT) {
+        /* For custom visuals, we need to create a colormap before creating
+         * this window. It will be freed directly after creating the window. */
+        visual = get_visualid_by_depth(depth);
+        win_colormap = xcb_generate_id(conn);
+        xcb_create_colormap_checked(conn, XCB_COLORMAP_ALLOC_NONE, win_colormap, root, visual);
 
-    /* see include/xcb.h for the FRAME_EVENT_MASK */
-    mask |= XCB_CW_EVENT_MASK;
-    values[1] = FRAME_EVENT_MASK & ~XCB_EVENT_MASK_ENTER_WINDOW;
+        /* We explicitly set a background color and border color (even though we
+         * don’t even have a border) because the X11 server requires us to when
+         * using 32 bit color depths, see
+         * http://stackoverflow.com/questions/3645632 */
+        mask |= XCB_CW_BACK_PIXEL;
+        values[0] = root_screen->black_pixel;
+
+        mask |= XCB_CW_BORDER_PIXEL;
+        values[1] = root_screen->black_pixel;
+
+        /* our own frames should not be managed */
+        mask |= XCB_CW_OVERRIDE_REDIRECT;
+        values[2] = 1;
+
+        /* see include/xcb.h for the FRAME_EVENT_MASK */
+        mask |= XCB_CW_EVENT_MASK;
+        values[3] = FRAME_EVENT_MASK & ~XCB_EVENT_MASK_ENTER_WINDOW;
+
+        mask |= XCB_CW_COLORMAP;
+        values[4] = win_colormap;
+    } else {
+        /* our own frames should not be managed */
+        mask = XCB_CW_OVERRIDE_REDIRECT;
+        values[0] = 1;
+
+        /* see include/xcb.h for the FRAME_EVENT_MASK */
+        mask |= XCB_CW_EVENT_MASK;
+        values[1] = FRAME_EVENT_MASK & ~XCB_EVENT_MASK_ENTER_WINDOW;
+
+        mask |= XCB_CW_COLORMAP;
+        values[2] = colormap;
+    }
 
     Rect dims = { -15, -15, 10, 10 };
-    con->frame = create_window(conn, dims, XCB_WINDOW_CLASS_INPUT_OUTPUT, XCURSOR_CURSOR_POINTER, false, mask, values);
+    con->frame = create_window(conn, dims, depth, visual, XCB_WINDOW_CLASS_INPUT_OUTPUT, XCURSOR_CURSOR_POINTER, false, mask, values);
+
+    if (win_colormap != XCB_NONE)
+        xcb_free_colormap(conn, win_colormap);
 
     struct con_state *state = scalloc(sizeof(struct con_state));
     state->id = con->frame;
@@ -307,7 +344,6 @@ void x_draw_decoration(Con *con) {
     p->con_deco_rect = con->deco_rect;
     p->background = config.client.background;
     p->con_is_leaf = con_is_leaf(con);
-    p->font = config.font.id;
 
     if (con->deco_render_params != NULL &&
         (con->window == NULL || !con->window->name_x_changed) &&
@@ -383,9 +419,26 @@ void x_draw_decoration(Con *con) {
             xcb_rectangle_t topline = { br.x, 0, con->rect.width + br.width + br.x, br.y };
             xcb_poly_fill_rectangle(conn, con->pixmap, con->pm_gc, 1, &topline);
         }
+
+        /* Highlight the side of the border at which the next window will be
+         * opened if we are rendering a single window within a split container
+         * (which is undistinguishable from a single window outside a split
+         * container otherwise. */
+        if (TAILQ_NEXT(con, nodes) == NULL &&
+            TAILQ_PREV(con, nodes_head, nodes) == NULL &&
+            con->parent->type != CT_FLOATING_CON) {
+            xcb_change_gc(conn, con->pm_gc, XCB_GC_FOREGROUND, (uint32_t[]){ p->color->indicator });
+            if (con_orientation(con->parent) == HORIZ)
+                xcb_poly_fill_rectangle(conn, con->pixmap, con->pm_gc, 1, (xcb_rectangle_t[]){
+                        { r->width + br.width + br.x, 0, r->width, r->height + br.height } });
+            else
+                xcb_poly_fill_rectangle(conn, con->pixmap, con->pm_gc, 1, (xcb_rectangle_t[]){
+                        { br.x, r->height + br.height + br.y, r->width - (2 * br.x), r->height } });
+        }
+
     }
 
-    /* if this is a borderless/1pixel window, we don’t * need to render the
+    /* if this is a borderless/1pixel window, we don’t need to render the
      * decoration. */
     if (p->border_style != BS_NORMAL)
         goto copy_pixmaps;
@@ -408,25 +461,17 @@ void x_draw_decoration(Con *con) {
     xcb_poly_segment(conn, parent->pixmap, parent->pm_gc, 2, segments);
 
     /* 6: draw the title */
-    uint32_t mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT;
-    uint32_t values[] = { p->color->text, p->color->background, config.font.id };
-    xcb_change_gc(conn, parent->pm_gc, mask, values);
-    int text_offset_y = config.font.height + (con->deco_rect.height - config.font.height) / 2 - 1;
+    set_font_colors(parent->pm_gc, p->color->text, p->color->background);
+    int text_offset_y = (con->deco_rect.height - config.font.height) / 2;
 
     struct Window *win = con->window;
     if (win == NULL || win->name_x == NULL) {
         /* this is a non-leaf container, we need to make up a good description */
         // TODO: use a good description instead of just "another container"
-        xcb_image_text_8(
-            conn,
-            strlen("another container"),
-            parent->pixmap,
-            parent->pm_gc,
-            con->deco_rect.x + 2,
-            con->deco_rect.y + text_offset_y,
-            "another container"
-        );
-
+        draw_text("another container", strlen("another container"), false,
+                parent->pixmap, parent->pm_gc,
+                con->deco_rect.x + 2, con->deco_rect.y + text_offset_y,
+                con->deco_rect.width - 2);
         goto copy_pixmaps;
     }
 
@@ -447,26 +492,33 @@ void x_draw_decoration(Con *con) {
     //DLOG("indent_level = %d, indent_mult = %d\n", indent_level, indent_mult);
     int indent_px = (indent_level * 5) * indent_mult;
 
-    if (win->uses_net_wm_name)
-        xcb_image_text_16(
-            conn,
-            win->name_len,
-            parent->pixmap,
-            parent->pm_gc,
-            con->deco_rect.x + 2 + indent_px,
-            con->deco_rect.y + text_offset_y,
-            (xcb_char2b_t*)win->name_x
-        );
-    else
-        xcb_image_text_8(
-            conn,
-            win->name_len,
-            parent->pixmap,
-            parent->pm_gc,
-            con->deco_rect.x + 2 + indent_px,
-            con->deco_rect.y + text_offset_y,
-            win->name_x
-        );
+    draw_text(win->name_x, win->name_len, win->uses_net_wm_name,
+            parent->pixmap, parent->pm_gc,
+            con->deco_rect.x + 2 + indent_px, con->deco_rect.y + text_offset_y,
+            con->deco_rect.width - 2 - indent_px);
+
+    /* Since we don’t clip the text at all, it might in some cases be painted
+     * on the border pixels on the right side of a window. Therefore, we draw
+     * the right border again after rendering the text (and the unconnected
+     * lines in border color). */
+
+    /* Draw a separator line after every tab (except the last one), so that
+     * tabs can be easily distinguished. */
+    if (parent->layout == L_TABBED && TAILQ_NEXT(con, nodes) != NULL) {
+        xcb_change_gc(conn, parent->pm_gc, XCB_GC_FOREGROUND, (uint32_t[]){ p->color->border });
+    } else {
+        xcb_change_gc(conn, parent->pm_gc, XCB_GC_FOREGROUND, (uint32_t[]){ p->color->background });
+    }
+    xcb_poly_line(conn, XCB_COORD_MODE_ORIGIN, parent->pixmap, parent->pm_gc, 4,
+                  (xcb_point_t[]){
+                      { dr->x + dr->width - 1, dr->y },
+                      { dr->x + dr->width - 1, dr->y + dr->height },
+                      { dr->x + dr->width - 2, dr->y },
+                      { dr->x + dr->width - 2, dr->y + dr->height }
+                  });
+
+    xcb_change_gc(conn, parent->pm_gc, XCB_GC_FOREGROUND, (uint32_t[]){ p->color->border });
+    xcb_poly_segment(conn, parent->pixmap, parent->pm_gc, 2, segments);
 
 copy_pixmaps:
     xcb_copy_area(conn, con->pixmap, con->frame, con->pm_gc, 0, 0, 0, 0, con->rect.width, con->rect.height);
@@ -586,7 +638,13 @@ void x_push_node(Con *con) {
                 xcb_free_pixmap(conn, con->pixmap);
                 xcb_free_gc(conn, con->pm_gc);
             }
-            xcb_create_pixmap(conn, root_depth, con->pixmap, con->frame, rect.width, rect.height);
+
+            uint16_t win_depth = root_depth;
+            if (con->window)
+                win_depth = con->window->depth;
+
+            xcb_create_pixmap(conn, win_depth, con->pixmap, con->frame, rect.width, rect.height);
+
             /* For the graphics context, we disable GraphicsExposure events.
              * Those will be sent when a CopyArea request cannot be fulfilled
              * properly due to parts of the source being unmapped or otherwise
@@ -955,12 +1013,14 @@ void x_set_name(Con *con, const char *name) {
  * Sets up i3 specific atoms (I3_SOCKET_PATH and I3_CONFIG_PATH)
  *
  */
-void x_set_i3_atoms() {
+void x_set_i3_atoms(void) {
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, root, A_I3_SOCKET_PATH, A_UTF8_STRING, 8,
                         (current_socketpath == NULL ? 0 : strlen(current_socketpath)),
                         current_socketpath);
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, root, A_I3_CONFIG_PATH, A_UTF8_STRING, 8,
                         strlen(current_configpath), current_configpath);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, root, A_I3_SHMLOG_PATH, A_UTF8_STRING, 8,
+                        strlen(shmlogname), shmlogname);
 }
 
 /*

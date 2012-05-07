@@ -16,7 +16,7 @@ sub get_marks {
 my $tmp = fresh_workspace;
 
 my $marks = get_marks();
-cmp_deeply($marks, [], 'no marks set so far');
+is_deeply($marks, [], 'no marks set so far');
 
 ##############################################################
 # 2: check that setting a mark is reflected in the get_marks reply
@@ -25,7 +25,7 @@ cmp_deeply($marks, [], 'no marks set so far');
 cmd 'open';
 cmd 'mark foo';
 
-cmp_deeply(get_marks(), [ 'foo' ], 'mark foo set');
+is_deeply(get_marks(), [ 'foo' ], 'mark foo set');
 
 ##############################################################
 # 3: check that the mark is gone after killing the container
@@ -33,6 +33,6 @@ cmp_deeply(get_marks(), [ 'foo' ], 'mark foo set');
 
 cmd 'kill';
 
-cmp_deeply(get_marks(), [ ], 'mark gone');
+is_deeply(get_marks(), [ ], 'mark gone');
 
 done_testing;

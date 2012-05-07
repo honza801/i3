@@ -54,4 +54,21 @@ ok(($unused ~~ @{get_workspace_names()}), 'workspace exists after moving');
 
 # TODO: need a non-invasive command before implementing a test which uses ','
 
+################################################################################
+# regression test: 10 invalid commands should not crash i3 (10 is the stack
+# depth)
+################################################################################
+
+cmd 'move gibberish' for (0 .. 10);
+
+does_i3_live;
+
+################################################################################
+# regression test: an invalid command should come back with an error.
+################################################################################
+
+my $reply = cmd 'bullshit-command-which-we-never-implement meh';
+is(scalar @$reply, 1, 'got one command reply');
+ok(!$reply->[0]->{success}, 'reply has success == false');
+
 done_testing;

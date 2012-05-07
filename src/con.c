@@ -49,8 +49,10 @@ Con *con_new(Con *parent, i3Window *window) {
     cnt++;
     if ((cnt % (sizeof(colors) / sizeof(char*))) == 0)
         cnt = 0;
-
-    x_con_init(new);
+    if (window)
+        x_con_init(new, window->depth);
+    else
+        x_con_init(new, XCB_COPY_FROM_PARENT);
 
     TAILQ_INIT(&(new->floating_head));
     TAILQ_INIT(&(new->nodes_head));
@@ -518,10 +520,12 @@ void con_toggle_fullscreen(Con *con, int fullscreen_mode) {
             fullscreen = con_get_fullscreen_con(workspace, CF_OUTPUT);
         }
         if (fullscreen != NULL) {
-            LOG("Not entering fullscreen mode, container (%p/%s) "
-                "already is in fullscreen mode\n",
+            /* Disable fullscreen for the currently fullscreened
+             * container and enable it for the one the user wants
+             * to have in fullscreen mode. */
+            LOG("Disabling fullscreen for (%p/%s) upon user request\n",
                 fullscreen, fullscreen->name);
-            goto update_netwm_state;
+            fullscreen->fullscreen_mode = CF_NONE;
         }
 
         /* 2: enable fullscreen */
@@ -531,7 +535,6 @@ void con_toggle_fullscreen(Con *con, int fullscreen_mode) {
         con->fullscreen_mode = CF_NONE;
     }
 
-update_netwm_state:
     DLOG("mode now: %d\n", con->fullscreen_mode);
 
     /* update _NET_WM_STATE if this container has a window */
@@ -644,8 +647,10 @@ void con_move_to_workspace(Con *con, Con *workspace, bool fix_coordinates, bool 
 
     /* 7: focus the con on the target workspace (the X focus is only updated by
      * calling tree_render(), so for the "real" focus this is a no-op).
-     * We don’t focus when there is a fullscreen con on that workspace. */
-    if (con_get_fullscreen_con(workspace, CF_OUTPUT) == NULL)
+     * We don’t focus the con for i3 pseudo workspaces like __i3_scratch and
+     * we don’t focus when there is a fullscreen con on that workspace. */
+    if ((workspace->name[0] != '_' || workspace->name[1] != '_') &&
+        con_get_fullscreen_con(workspace, CF_OUTPUT) == NULL)
         con_focus(con_descend_focused(con));
 
     /* 8: when moving to a visible workspace on a different output, we keep the

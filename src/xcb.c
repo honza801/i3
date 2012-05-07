@@ -16,12 +16,17 @@ unsigned int xcb_numlock_mask;
  * for errors.
  *
  */
-xcb_window_t create_window(xcb_connection_t *conn, Rect dims, uint16_t window_class,
+xcb_window_t create_window(xcb_connection_t *conn, Rect dims,
+        uint16_t depth, xcb_visualid_t visual, uint16_t window_class,
         enum xcursor_cursor_t cursor, bool map, uint32_t mask, uint32_t *values) {
     xcb_window_t result = xcb_generate_id(conn);
 
-    /* If the window class is XCB_WINDOW_CLASS_INPUT_ONLY, depth has to be 0 */
-    uint16_t depth = (window_class == XCB_WINDOW_CLASS_INPUT_ONLY ? 0 : XCB_COPY_FROM_PARENT);
+    /* If the window class is XCB_WINDOW_CLASS_INPUT_ONLY, we copy depth and
+     * visual id from the parent window. */
+    if (window_class == XCB_WINDOW_CLASS_INPUT_ONLY) {
+        depth = XCB_COPY_FROM_PARENT;
+        visual = XCB_COPY_FROM_PARENT;
+    }
 
     xcb_create_window(conn,
             depth,
@@ -30,7 +35,7 @@ xcb_window_t create_window(xcb_connection_t *conn, Rect dims, uint16_t window_cl
             dims.x, dims.y, dims.width, dims.height, /* dimensions */
             0, /* border = 0, we draw our own */
             window_class,
-            XCB_WINDOW_CLASS_COPY_FROM_PARENT, /* copy visual from parent */
+            visual,
             mask,
             values);
 
@@ -131,32 +136,6 @@ void xcb_raise_window(xcb_connection_t *conn, xcb_window_t window) {
 }
 
 /*
- * Query the width of the given text (16-bit characters, UCS) with given real
- * length (amount of glyphs) using the given font.
- *
- */
-int predict_text_width(char *text, int length) {
-    xcb_query_text_extents_cookie_t cookie;
-    xcb_query_text_extents_reply_t *reply;
-    xcb_generic_error_t *error;
-    int width;
-
-    cookie = xcb_query_text_extents(conn, config.font.id, length, (xcb_char2b_t*)text);
-    if ((reply = xcb_query_text_extents_reply(conn, cookie, &error)) == NULL) {
-        ELOG("Could not get text extents (X error code %d)\n",
-             error->error_code);
-        /* We return the rather safe guess of 7 pixels, because a
-         * rendering error is better than a crash. Plus, the user will
-         * see the error in his log. */
-        return 7;
-    }
-
-    width = reply->overall_width;
-    free(reply);
-    return width;
-}
-
-/*
  * Configures the given window to have the size/position specified by given rect
  *
  */
@@ -219,4 +198,47 @@ void xcb_set_root_cursor(int cursor) {
     xcb_change_window_attributes(conn, root, XCB_CW_CURSOR, &cursor_id);
     xcb_free_cursor(conn, cursor_id);
     xcb_flush(conn);
+}
+
+/*
+ * Get depth of visual specified by visualid
+ *
+ */
+uint16_t get_visual_depth(xcb_visualid_t visual_id){
+    xcb_depth_iterator_t depth_iter;
+
+    depth_iter = xcb_screen_allowed_depths_iterator(root_screen);
+    for (; depth_iter.rem; xcb_depth_next(&depth_iter)) {
+        xcb_visualtype_iterator_t visual_iter;
+
+        visual_iter = xcb_depth_visuals_iterator(depth_iter.data);
+        for (; visual_iter.rem; xcb_visualtype_next(&visual_iter)) {
+            if (visual_id == visual_iter.data->visual_id) {
+                return depth_iter.data->depth;
+            }
+        }
+    }
+    return 0;
+}
+
+/*
+ * Get visualid with specified depth
+ *
+ */
+xcb_visualid_t get_visualid_by_depth(uint16_t depth){
+    xcb_depth_iterator_t depth_iter;
+
+    depth_iter = xcb_screen_allowed_depths_iterator(root_screen);
+    for (; depth_iter.rem; xcb_depth_next(&depth_iter)) {
+        if (depth_iter.data->depth != depth)
+            continue;
+
+        xcb_visualtype_iterator_t visual_iter;
+
+        visual_iter = xcb_depth_visuals_iterator(depth_iter.data);
+        if (!visual_iter.rem)
+            continue;
+        return visual_iter.data->visual_id;
+    }
+    return 0;
 }

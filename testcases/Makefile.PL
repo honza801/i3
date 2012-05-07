@@ -4,22 +4,28 @@ use strict; use warnings;
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
-    NAME => 'i3 testsuite',
+    NAME => 'i3-testsuite',
     MIN_PERL_VERSION => '5.010000', # 5.10.0
     PREREQ_PM => {
         'AnyEvent'     => 0,
         'AnyEvent::I3' => '0.09',
         'X11::XCB'     => '0.03',
-        'Test::Most'   => 0,
-        'Test::Deep'   => 0,
-	'EV'	       => 0,
-	'Inline'       => 0,
+        'Inline'       => 0,
+        'Test::More'   => '0.94',
     },
-    # don't install any files from this directory
-    PM => {},
+    PM => {}, # do not install any files from this directory
     clean => {
-        FILES => 'testsuite-* latest'
+        FILES => 'testsuite-* latest i3-cfg-for-*',
     }
 );
-# and don't run the tests while installing
-sub MY::test { }
+
+package MY;
+sub test { } # do not run the tests while installing
+
+# do not rename the Makefile
+sub clean {
+    my $section = shift->SUPER::clean(@_);
+    $section =~ s/^\t\Q$_\E\n$//m for
+        '- $(MV) $(FIRST_MAKEFILE) $(MAKEFILE_OLD) $(DEV_NULL)';
+    $section;
+}

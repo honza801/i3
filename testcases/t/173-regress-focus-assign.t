@@ -1,16 +1,11 @@
 #!perl
 # vim:ts=4:sw=4:expandtab
-# !NO_I3_INSTANCE! will prevent complete-run.pl from starting i3
 #
 # Regression: Checks if focus is stolen when a window is managed which is
 # assigned to an invisible workspace
 #
-use i3test;
-use X11::XCB qw(:all);
-use X11::XCB::Connection;
-use v5.10;
-
-my $x = X11::XCB::Connection->new;
+use i3test i3_autostart => 0;
+use X11::XCB qw(PROP_MODE_REPLACE);
 
 # TODO: move to X11::XCB
 sub set_wm_class {
@@ -31,6 +26,21 @@ sub set_wm_class {
     );
 }
 
+sub open_special {
+    my %args = @_;
+    my $wm_class = delete($args{wm_class}) || 'special';
+    $args{name} //= 'special window';
+
+    # We use dont_map because i3 will not map the window on the current
+    # workspace. Thus, open_window would time out in wait_for_map (2 seconds).
+    my $window = open_window(
+        %args,
+        before_map => sub { set_wm_class($_->id, $wm_class, $wm_class) },
+        dont_map => 1,
+    );
+    $window->map;
+    return $window;
+}
 
 #####################################################################
 # start a window and see that it does not get assigned with an empty config
@@ -49,18 +59,7 @@ my $tmp = fresh_workspace;
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 ok(get_ws($tmp)->{focused}, 'current workspace focused');
 
-my $window = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
-);
-
-$window->_create;
-set_wm_class($window->id, 'special', 'special');
-$window->name('special window');
-$window->map;
-sleep 0.25;
-
+my $window = open_special;
 
 ok(@{get_ws_content($tmp)} == 0, 'special window not on current workspace');
 ok(@{get_ws_content('targetws')} == 1, 'special window on targetws');
@@ -70,19 +69,9 @@ ok(get_ws($tmp)->{focused}, 'current workspace still focused');
 # the same test, but with a floating window
 #####################################################################
 
-$window = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
+$window = open_special(
     window_type => $x->atom(name => '_NET_WM_WINDOW_TYPE_UTILITY'),
 );
-
-$window->_create;
-set_wm_class($window->id, 'special', 'special');
-$window->name('special window');
-$window->map;
-sleep 0.25;
-
 
 ok(@{get_ws_content($tmp)} == 0, 'special window not on current workspace');
 ok(@{get_ws_content('targetws')} == 1, 'special window on targetws');

@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * assignments.c: Assignments for specific windows (for_window).
  *
@@ -16,6 +16,8 @@
  */
 void run_assignments(i3Window *window) {
     DLOG("Checking if any assignments match this window\n");
+
+    bool needs_tree_render = false;
 
     /* Check if any assignments match */
     Assignment *current;
@@ -41,9 +43,13 @@ void run_assignments(i3Window *window) {
             DLOG("execute command %s\n", current->dest.command);
             char *full_command;
             sasprintf(&full_command, "[id=\"%d\"] %s", window->id, current->dest.command);
-            char *json_result = parse_cmd(full_command);
-            FREE(full_command);
-            FREE(json_result);
+            struct CommandResult *command_output = parse_command(full_command);
+            free(full_command);
+
+            if (command_output->needs_tree_render)
+                needs_tree_render = true;
+
+            yajl_gen_free(command_output->json_gen);
         }
 
         /* Store that we ran this assignment to not execute it again */
@@ -51,6 +57,10 @@ void run_assignments(i3Window *window) {
         window->ran_assignments = srealloc(window->ran_assignments, sizeof(Assignment*) * window->nr_assignments);
         window->ran_assignments[window->nr_assignments-1] = current;
     }
+
+    /* If any of the commands required re-rendering, we will do that now. */
+    if (needs_tree_render)
+        tree_render();
 }
 
 /*

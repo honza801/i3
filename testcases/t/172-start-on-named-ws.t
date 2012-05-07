@@ -1,14 +1,8 @@
 #!perl
 # vim:ts=4:sw=4:expandtab
-# !NO_I3_INSTANCE! will prevent complete-run.pl from starting i3
-#
 # checks if i3 starts up on workspace '1' or the first configured named workspace
 #
-use X11::XCB qw(:all);
-use X11::XCB::Connection;
-use i3test;
-
-my $x = X11::XCB::Connection->new;
+use i3test i3_autostart => 0;
 
 ##############################################################
 # 1: i3 should start with workspace '1'
@@ -22,7 +16,7 @@ EOT
 my $pid = launch_with_config($config);
 
 my @names = @{get_workspace_names()};
-cmp_deeply(\@names, [ '1' ], 'i3 starts on workspace 1 without any configuration');
+is_deeply(\@names, [ '1' ], 'i3 starts on workspace 1 without any configuration');
 
 exit_gracefully($pid);
 
@@ -39,8 +33,8 @@ EOT
 
 $pid = launch_with_config($config);
 
-my @names = @{get_workspace_names()};
-cmp_deeply(\@names, [ 'foobar' ], 'i3 starts on named workspace foobar');
+@names = @{get_workspace_names()};
+is_deeply(\@names, [ 'foobar' ], 'i3 starts on named workspace foobar');
 
 exit_gracefully($pid);
 
@@ -57,8 +51,8 @@ EOT
 
 $pid = launch_with_config($config);
 
-my @names = @{get_workspace_names()};
-cmp_deeply(\@names, [ 'foobar' ], 'i3 starts on named workspace foobar');
+@names = @{get_workspace_names()};
+is_deeply(\@names, [ 'foobar' ], 'i3 starts on named workspace foobar');
 
 exit_gracefully($pid);
 

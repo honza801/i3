@@ -143,8 +143,17 @@ void render_con(Con *con, bool render_fullscreen) {
         inset->width -= (2 * con->border_width);
         inset->height -= (2 * con->border_width);
 
-        /* Obey the aspect ratio, if any */
-        if (con->proportional_height != 0 &&
+        /* Obey the aspect ratio, if any, unless we are in fullscreen mode.
+         *
+         * The spec isn’t explicit on whether the aspect ratio hints should be
+         * respected during fullscreen mode. Other WMs such as Openbox don’t do
+         * that, and this post suggests that this is the correct way to do it:
+         * http://mail.gnome.org/archives/wm-spec-list/2003-May/msg00007.html
+         *
+         * Ignoring aspect ratio during fullscreen was necessary to fix MPlayer
+         * subtitle rendering, see http://bugs.i3wm.org/594 */
+        if (!render_fullscreen &&
+            con->proportional_height != 0 &&
             con->proportional_width != 0) {
             double new_height = inset->height + 1;
             int new_width = inset->width;
@@ -193,7 +202,9 @@ void render_con(Con *con, bool render_fullscreen) {
     }
 
     /* find the height for the decorations */
-    int deco_height = config.font.height + 5;
+    int deco_height = config.font.height + 4;
+    if (config.font.height & 0x01)
+        ++deco_height;
 
     /* precalculate the sizes to be able to correct rounding errors */
     int sizes[children];
@@ -219,6 +230,9 @@ void render_con(Con *con, bool render_fullscreen) {
     }
 
     if (con->layout == L_OUTPUT) {
+        /* Skip i3-internal outputs */
+        if (con->name[0] == '_' && con->name[1] == '_')
+            return;
         render_l_output(con);
     } else if (con->type == CT_ROOT) {
         Con *output;
@@ -232,6 +246,8 @@ void render_con(Con *con, bool render_fullscreen) {
          * windows/containers so that they overlap on another output. */
         DLOG("Rendering floating windows:\n");
         TAILQ_FOREACH(output, &(con->nodes_head), nodes) {
+            if (output->name[0] == '_' && output->name[1] == '_')
+                continue;
             /* Get the active workspace of that output */
             Con *content = output_get_content(output);
             Con *workspace = TAILQ_FIRST(&(content->focus_head));

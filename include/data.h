@@ -17,17 +17,25 @@
 #include <xcb/xcb_atom.h>
 #include <stdbool.h>
 #include <pcre.h>
+#include <sys/time.h>
 
 #include "queue.h"
 
 /*
- * To get the big concept: There are helper structures like struct Colorpixel
- * or struct Stack_Window. Everything which is also defined as type (see
+ * To get the big concept: There are helper structures like struct
+ * Workspace_Assignment. Every struct which is also defined as type (see
  * forward definitions) is considered to be a major structure, thus important.
  *
- * Let’s start from the biggest to the smallest:
+ * The following things are all stored in a 'Con', from very high level (the
+ * biggest Cons) to very small (a single window):
  *
- * TODO
+ * 1) X11 root window (as big as all your outputs combined)
+ * 2) output (like LVDS1)
+ * 3) content container, dockarea containers
+ * 4) workspaces
+ * 5) split containers
+ * ... (you can arbitrarily nest split containers)
+ * 6) X11 window containers
  *
  */
 
@@ -119,7 +127,6 @@ struct deco_render_params {
     Rect con_deco_rect;
     uint32_t background;
     bool con_is_leaf;
-    xcb_font_t font;
 };
 
 /**
@@ -178,7 +185,7 @@ struct regex {
 
 /**
  * Holds a keybinding, consisting of a keycode combined with modifiers and the
- * command which is executed as soon as the key is pressed (see src/command.c)
+ * command which is executed as soon as the key is pressed (see src/cfgparse.y)
  *
  */
 struct Binding {
@@ -257,6 +264,11 @@ struct xoutput {
     TAILQ_ENTRY(xoutput) outputs;
 };
 
+/**
+ * A 'Window' is a type which contains an xcb_window_t and all the related
+ * information (hints like _NET_WM_NAME for that window).
+ *
+ */
 struct Window {
     xcb_window_t id;
 
@@ -285,13 +297,16 @@ struct Window {
     char *name_json;
 
     /** The length of the name in glyphs (not bytes) */
-    int name_len;
+    size_t name_len;
 
     /** Whether the application used _NET_WM_NAME */
     bool uses_net_wm_name;
 
     /** Whether the application needs to receive WM_TAKE_FOCUS */
     bool needs_take_focus;
+
+    /** When this window was marked urgent. 0 means not urgent */
+    struct timeval urgent;
 
     /** Whether this window accepts focus. We store this inverted so that the
      * default will be 'accepts focus'. */
@@ -307,8 +322,19 @@ struct Window {
      * (assignments run only once) */
     uint32_t nr_assignments;
     Assignment **ran_assignments;
+
+    /** Depth of the window */
+    uint16_t depth;
 };
 
+/**
+ * A "match" is a data structure which acts like a mask or expression to match
+ * certain windows or not. For example, when using commands, you can specify a
+ * command like this: [title="*Firefox*"] kill. The title member of the match
+ * data structure will then be filled and i3 will check each window using
+ * match_matches_window() to find the windows affected by this command.
+ *
+ */
 struct Match {
     struct regex *title;
     struct regex *application;
@@ -316,6 +342,11 @@ struct Match {
     struct regex *instance;
     struct regex *mark;
     struct regex *role;
+    enum {
+        U_DONTCHECK = -1,
+        U_LATEST = 0,
+        U_OLDEST = 1
+    } urgent;
     enum {
         M_DONTCHECK = -1,
         M_NODOCK = 0,
@@ -338,15 +369,20 @@ struct Match {
      */
     enum { M_HERE = 0, M_ASSIGN_WS, M_BELOW } insert_where;
 
+    /* Whether this match was generated when restarting i3 inplace.
+     * Leads to not setting focus when managing a new window, because the old
+     * focus stack should be restored. */
+    bool restart_mode;
+
     TAILQ_ENTRY(Match) matches;
 };
 
 /**
  * An Assignment makes specific windows go to a specific workspace/output or
  * run a command for that window. With this mechanism, the user can -- for
- * example -- make specific windows floating or assign his browser to workspace
- * "www". Checking if a window is assigned works by comparing the Match data
- * structure with the window (see match_matches_window()).
+ * example -- assign his browser to workspace "www". Checking if a window is
+ * assigned works by comparing the Match data structure with the window (see
+ * match_matches_window()).
  *
  */
 struct Assignment {
@@ -381,6 +417,10 @@ struct Assignment {
     TAILQ_ENTRY(Assignment) assignments;
 };
 
+/**
+ * A 'Con' represents everything from the X11 root window down to a single X11 window.
+ *
+ */
 struct Con {
     bool mapped;
     enum {
@@ -485,6 +525,16 @@ struct Con {
 
     /** callbacks */
     void(*on_remove_child)(Con *);
+
+    enum {
+        SCRATCHPAD_NONE = 0,
+        SCRATCHPAD_FRESH = 1,
+        SCRATCHPAD_CHANGED = 2
+    } scratchpad_state;
+
+    /* The ID of this container before restarting. Necessary to correctly
+     * interpret back-references in the JSON (such as the focus stack). */
+    int old_id;
 };
 
 #endif

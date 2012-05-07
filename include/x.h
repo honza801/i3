@@ -19,7 +19,7 @@ extern xcb_window_t focused_id;
  * every container from con_new().
  *
  */
-void x_con_init(Con *con);
+void x_con_init(Con *con, uint16_t depth);
 
 /**
  * Moves a child window from Container src to Container dest.
@@ -108,7 +108,7 @@ void x_set_name(Con *con, const char *name);
  * Sets up i3 specific atoms (I3_SOCKET_PATH and I3_CONFIG_PATH)
  *
  */
-void x_set_i3_atoms();
+void x_set_i3_atoms(void);
 
 /**
  * Set warp_to coordinates.  This will trigger on the next call to

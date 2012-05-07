@@ -30,12 +30,16 @@ struct xcb_color_strings_t {
     char *bar_bg;
     char *active_ws_fg;
     char *active_ws_bg;
+    char *active_ws_border;
     char *inactive_ws_fg;
     char *inactive_ws_bg;
+    char *inactive_ws_border;
     char *focus_ws_bg;
     char *focus_ws_fg;
+    char *focus_ws_border;
     char *urgent_ws_bg;
     char *urgent_ws_fg;
+    char *urgent_ws_border;
 };
 
 typedef struct xcb_colors_t xcb_colors_t;
@@ -74,6 +78,17 @@ void clean_xcb();
 void get_atoms();
 
 /*
+ * Reparents all tray clients of the specified output to the root window. This
+ * is either used when shutting down, when an output appears (xrandr --output
+ * VGA1 --off) or when the primary output changes.
+ *
+ * Applications using the tray will start the protocol from the beginning again
+ * afterwards.
+ *
+ */
+void kick_tray_clients(i3_output *output);
+
+/*
  * Destroy the bar of the specified output
  *
  */
@@ -102,13 +117,5 @@ void draw_bars();
  *
  */
 void redraw_bars();
-
-/*
- * Predicts the length of text based on cached data.
- * The string has to be encoded in ucs2 and glyph_len has to be the length
- * of the string (in glyphs).
- *
- */
-uint32_t predict_text_extents(xcb_char2b_t *text, uint32_t length);
 
 #endif

@@ -27,10 +27,17 @@ typedef struct Font i3Font;
  *
  */
 struct Font {
-    /** The height of the font, built from font_ascent + font_descent */
-    int height;
     /** The xcb-id for the font */
     xcb_font_t id;
+
+    /** Font information gathered from the server */
+    xcb_query_font_reply_t *info;
+
+    /** Font table for this font (may be NULL) */
+    xcb_charinfo_t *table;
+
+    /** The height of the font, built from font_ascent + font_descent */
+    int height;
 };
 
 /* Since this file also gets included by utilities which don’t use the i3 log
@@ -40,13 +47,14 @@ struct Font {
 #endif
 
 /**
- * Try to get the socket path from X11 and return NULL if it doesn’t work.
+ * Try to get the contents of the given atom (for example I3_SOCKET_PATH) from
+ * the X11 root window and return NULL if it doesn’t work.
  *
- * The memory for the socket path is dynamically allocated and has to be
+ * The memory for the contents is dynamically allocated and has to be
  * free()d by the caller.
  *
  */
-char *socket_path_from_x11();
+char *root_atom_contents(const char *atomname);
 
 /**
  * Safe-wrapper around malloc which exits if malloc returns NULL (meaning that
@@ -177,6 +185,61 @@ uint32_t get_mod_mask_for(uint32_t keysym,
  * the fonts 'fixed' or '-misc-*' will be loaded instead of exiting.
  *
  */
-i3Font load_font(const char *pattern, bool fallback);
+i3Font load_font(const char *pattern, const bool fallback);
+
+/**
+ * Defines the font to be used for the forthcoming calls.
+ *
+ */
+void set_font(i3Font *font);
+
+/**
+ * Frees the resources taken by the current font.
+ *
+ */
+void free_font(void);
+
+/**
+ * Converts the given string to UTF-8 from UCS-2 big endian. The return value
+ * must be freed after use.
+ *
+ */
+char *convert_ucs2_to_utf8(xcb_char2b_t *text, size_t num_glyphs);
+
+/**
+ * Converts the given string to UCS-2 big endian for use with
+ * xcb_image_text_16(). The amount of real glyphs is stored in real_strlen,
+ * a buffer containing the UCS-2 encoded string (16 bit per glyph) is
+ * returned. It has to be freed when done.
+ *
+ */
+xcb_char2b_t *convert_utf8_to_ucs2(char *input, size_t *real_strlen);
+
+/**
+ * Defines the colors to be used for the forthcoming draw_text calls.
+ *
+ */
+void set_font_colors(xcb_gcontext_t gc, uint32_t foreground, uint32_t background);
+
+/**
+ * Draws text onto the specified X drawable (normally a pixmap) at the
+ * specified coordinates (from the top left corner of the leftmost, uppermost
+ * glyph) and using the provided gc.
+ *
+ * Text can be specified as UCS-2 or UTF-8. If it's specified as UCS-2, then
+ * text_len must be the number of glyphs in the string. If it's specified as
+ * UTF-8, then text_len must be the number of bytes in the string (not counting
+ * the null terminator).
+ *
+ */
+void draw_text(char *text, size_t text_len, bool is_ucs2, xcb_drawable_t drawable,
+        xcb_gcontext_t gc, int x, int y, int max_width);
+
+/**
+ * Predict the text width in pixels for the given text. Text can be specified
+ * as UCS-2 or UTF-8.
+ *
+ */
+int predict_text_width(char *text, size_t text_len, bool is_ucs2);
 
 #endif

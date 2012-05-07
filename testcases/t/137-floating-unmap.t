@@ -4,11 +4,6 @@
 # to a different workspace.
 
 use i3test;
-use X11::XCB qw(:all);
-
-BEGIN {
-    use_ok('X11::XCB::Window');
-}
 
 my $i3 = i3(get_socket_path());
 
@@ -18,17 +13,15 @@ my $tmp = fresh_workspace;
 # 1: open a floating window, get it mapped
 #############################################################################
 
-my $x = X11::XCB::Connection->new;
-
 # Create a floating window which is smaller than the minimum enforced size of i3
-my $window = open_floating_window($x);
+my $window = open_floating_window;
 ok($window->mapped, 'Window is mapped');
 
 # switch to a different workspace, see if the window is still mapped?
 
 my $otmp = fresh_workspace;
 
-sync_with_i3($x);
+sync_with_i3;
 
 ok(!$window->mapped, 'Window is not mapped after switching ws');
 

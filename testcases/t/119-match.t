@@ -4,15 +4,14 @@
 # Tests all kinds of matching methods
 #
 use i3test;
-use X11::XCB qw(:all);
+use X11::XCB qw(PROP_MODE_REPLACE);
 
 my $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
 # Open a new window
-my $x = X11::XCB::Connection->new;
-my $window = open_window($x);
+my $window = open_window;
 my $content = get_ws_content($tmp);
 ok(@{$content} == 1, 'window mapped');
 my $win = $content->[0];
@@ -35,7 +34,7 @@ cmd 'nop now killing the window';
 my $id = $win->{id};
 cmd qq|[con_id="$id"] kill|;
 
-wait_for_unmap $x;
+wait_for_unmap $window;
 
 cmd 'nop checking if its gone';
 $content = get_ws_content($tmp);
@@ -70,31 +69,21 @@ sub set_wm_class {
     );
 }
 
-my $left = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
-    event_mask => [ 'structure_notify' ],
-);
+sub open_special {
+    my %args = @_;
+    my $wm_class = delete($args{wm_class}) || 'special';
 
-$left->_create;
-set_wm_class($left->id, 'special', 'special');
-$left->name('left');
-$left->map;
-ok(wait_for_map($x), 'left window mapped');
+    return open_window(
+        %args,
+        before_map => sub { set_wm_class($_->id, $wm_class, $wm_class) },
+    );
+}
 
-my $right = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
-    event_mask => [ 'structure_notify' ],
-);
+my $left = open_special(name => 'left');
+ok($left->mapped, 'left window mapped');
 
-$right->_create;
-set_wm_class($right->id, 'special', 'special');
-$right->name('right');
-$right->map;
-ok(wait_for_map($x), 'right window mapped');
+my $right = open_special(name => 'right');
+ok($right->mapped, 'right window mapped');
 
 # two windows should be here
 $content = get_ws_content($tmp);
@@ -102,7 +91,7 @@ ok(@{$content} == 2, 'two windows opened');
 
 cmd '[class="special" title="left"] kill';
 
-sync_with_i3($x);
+sync_with_i3;
 
 $content = get_ws_content($tmp);
 is(@{$content}, 1, 'one window still there');
@@ -113,18 +102,8 @@ is(@{$content}, 1, 'one window still there');
 
 $tmp = fresh_workspace;
 
-$left = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
-    event_mask => [ 'structure_notify' ],
-);
-
-$left->_create;
-set_wm_class($left->id, 'special7', 'special7');
-$left->name('left');
-$left->map;
-ok(wait_for_map($x), 'left window mapped');
+$left = open_special(name => 'left', wm_class => 'special7');
+ok($left->mapped, 'left window mapped');
 
 # two windows should be here
 $content = get_ws_content($tmp);
@@ -132,7 +111,7 @@ ok(@{$content} == 1, 'window opened');
 
 cmd '[class="^special[0-9]$"] kill';
 
-wait_for_unmap $x;
+wait_for_unmap $left;
 
 $content = get_ws_content($tmp);
 is(@{$content}, 0, 'window killed');
@@ -143,18 +122,8 @@ is(@{$content}, 0, 'window killed');
 
 $tmp = fresh_workspace;
 
-$left = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30 ],
-    background_color => '#0000ff',
-    event_mask => [ 'structure_notify' ],
-);
-
-$left->_create;
-set_wm_class($left->id, 'special7', 'special7');
-$left->name('ä 3');
-$left->map;
-ok(wait_for_map($x), 'left window mapped');
+$left = open_special(name => 'ä 3', wm_class => 'special7');
+ok($left->mapped, 'left window mapped');
 
 # two windows should be here
 $content = get_ws_content($tmp);
@@ -162,7 +131,7 @@ ok(@{$content} == 1, 'window opened');
 
 cmd '[title="^\w [3]$"] kill';
 
-wait_for_unmap $x;
+wait_for_unmap $left;
 
 $content = get_ws_content($tmp);
 is(@{$content}, 0, 'window killed');

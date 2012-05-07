@@ -1,14 +1,9 @@
 #!perl
 # vim:ts=4:sw=4:expandtab
-# !NO_I3_INSTANCE! will prevent complete-run.pl from starting i3
 #
 # Tests if the 'force_focus_wrapping' config directive works correctly.
 #
-use i3test;
-use X11::XCB qw(:all);
-use X11::XCB::Connection;
-
-my $x = X11::XCB::Connection->new;
+use i3test i3_autostart => 0;
 
 #####################################################################
 # 1: test the wrapping behaviour without force_focus_wrapping
@@ -25,13 +20,13 @@ my $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-my $first = open_window($x);
-my $second = open_window($x);
+my $first = open_window;
+my $second = open_window;
 
 cmd 'layout tabbed';
 cmd 'focus parent';
 
-my $third = open_window($x);
+my $third = open_window;
 is($x->input_focus, $third->id, 'third window focused');
 
 cmd 'focus left';
@@ -66,15 +61,13 @@ $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-$first = open_window($x);
-$second = open_window($x);
+$first = open_window;
+$second = open_window;
 
 cmd 'layout tabbed';
 cmd 'focus parent';
 
-$third = open_window($x);
-
-sync_with_i3($x);
+$third = open_window;
 
 is($x->input_focus, $third->id, 'third window focused');
 

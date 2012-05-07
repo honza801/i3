@@ -50,7 +50,7 @@ static char *glyphs_utf8[512];
 static int input_position;
 static i3Font font;
 static char *prompt;
-static int prompt_len;
+static size_t prompt_len;
 static int limit;
 xcb_window_t root;
 xcb_connection_t *conn;
@@ -94,7 +94,9 @@ static int handle_expose(void *data, xcb_connection_t *conn, xcb_expose_event_t 
     xcb_poly_fill_rectangle(conn, pixmap, pixmap_gc, 1, &inner);
 
     /* restore font color */
-    xcb_change_gc(conn, pixmap_gc, XCB_GC_FOREGROUND, (uint32_t[]){ get_colorpixel("#FFFFFF") });
+    set_font_colors(pixmap_gc, get_colorpixel("#FFFFFF"), get_colorpixel("#000000"));
+
+    /* draw the text */
     uint8_t *con = concat_strings(glyphs_ucs, input_position);
     char *full_text = (char*)con;
     if (prompt != NULL) {
@@ -104,8 +106,8 @@ static int handle_expose(void *data, xcb_connection_t *conn, xcb_expose_event_t 
         memcpy(full_text, prompt, prompt_len * 2);
         memcpy(full_text + (prompt_len * 2), con, input_position * 2);
     }
-    xcb_image_text_16(conn, input_position + prompt_len, pixmap, pixmap_gc, 4 /* X */,
-                      font.height + 2 /* Y = baseline of font */, (xcb_char2b_t*)full_text);
+    if (input_position + prompt_len != 0)
+        draw_text(full_text, input_position + prompt_len, true, pixmap, pixmap_gc, 4, 4, 492);
 
     /* Copy the contents of the pixmap to the real window */
     xcb_copy_area(conn, pixmap, win, pixmap_gc, 0, 0, 0, 0, /* */ 500, font.height + 8);
@@ -260,14 +262,14 @@ static int handle_key_press(void *ignored, xcb_connection_t *conn, xcb_key_press
 
     printf("inp[0] = %02x, inp[1] = %02x, inp[2] = %02x\n", inp[0], inp[1], inp[2]);
     /* convert it to UTF-8 */
-    char *out = convert_ucs_to_utf8((char*)inp);
+    char *out = convert_ucs2_to_utf8((xcb_char2b_t*)inp, 1);
     printf("converted to %s\n", out);
 
     glyphs_ucs[input_position] = malloc(3 * sizeof(uint8_t));
     if (glyphs_ucs[input_position] == NULL)
         err(EXIT_FAILURE, "malloc() failed\n");
     memcpy(glyphs_ucs[input_position], inp, 3);
-    glyphs_utf8[input_position] = strdup(out);
+    glyphs_utf8[input_position] = out;
     input_position++;
 
     if (input_position == limit)
@@ -340,7 +342,7 @@ int main(int argc, char *argv[]) {
     printf("using format \"%s\"\n", format);
 
     if (socket_path == NULL)
-        socket_path = socket_path_from_x11();
+        socket_path = root_atom_contents("I3_SOCKET_PATH");
 
     if (socket_path == NULL)
         socket_path = "/tmp/i3-ipc.sock";
@@ -348,7 +350,7 @@ int main(int argc, char *argv[]) {
     sockfd = ipc_connect(socket_path);
 
     if (prompt != NULL)
-        prompt = convert_utf8_to_ucs2(prompt, &prompt_len);
+        prompt = (char*)convert_utf8_to_ucs2(prompt, &prompt_len);
 
     int screens;
     conn = xcb_connect(NULL, &screens);
@@ -361,6 +363,7 @@ int main(int argc, char *argv[]) {
     symbols = xcb_key_symbols_alloc(conn);
 
     font = load_font(pattern, true);
+    set_font(&font);
 
     /* Open an input window */
     win = xcb_generate_id(conn);
@@ -392,9 +395,6 @@ int main(int argc, char *argv[]) {
     /* Set input focus (we have override_redirect=1, so the wm will not do
      * this for us) */
     xcb_set_input_focus(conn, XCB_INPUT_FOCUS_POINTER_ROOT, win, XCB_CURRENT_TIME);
-
-    /* Create graphics context */
-    xcb_change_gc(conn, pixmap_gc, XCB_GC_FONT, (uint32_t[]){ font.id });
 
     /* Grab the keyboard to get all input */
     xcb_flush(conn);

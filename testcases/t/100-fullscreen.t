@@ -2,7 +2,6 @@
 # vim:ts=4:sw=4:expandtab
 
 use i3test;
-use X11::XCB qw(:all);
 use List::Util qw(first);
 
 my $i3 = i3(get_socket_path());
@@ -26,23 +25,15 @@ for my $o (@outputs) {
     }
 }
 
-BEGIN {
-    use_ok('X11::XCB::Window');
-}
-
-my $x = X11::XCB::Connection->new;
-
 ##################################
 # map a window, then fullscreen it
 ##################################
 
 my $original_rect = X11::XCB::Rect->new(x => 0, y => 0, width => 30, height => 30);
 
-my $window = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
+my $window = open_window(
     rect => $original_rect,
-    background_color => '#C0C0C0',
-    event_mask => [ 'structure_notify' ],
+    dont_map => 1,
 );
 
 isa_ok($window, 'X11::XCB::Window');
@@ -51,21 +42,21 @@ is_deeply($window->rect, $original_rect, "rect unmodified before mapping");
 
 $window->map;
 
-wait_for_map $x;
+wait_for_map $window;
 
 # open another container to make the window get only half of the screen
 cmd 'open';
 
 my $new_rect = $window->rect;
-ok(!eq_deeply($new_rect, $original_rect), "Window got repositioned");
+ok(!eq_hash($new_rect, $original_rect), "Window got repositioned");
 $original_rect = $new_rect;
 
 $window->fullscreen(1);
 
-sync_with_i3($x);
+sync_with_i3;
 
 $new_rect = $window->rect;
-ok(!eq_deeply($new_rect, $original_rect), "Window got repositioned after fullscreen");
+ok(!eq_hash($new_rect, $original_rect), "Window got repositioned after fullscreen");
 
 my $orect = $output->{rect};
 my $wrect = $new_rect;
@@ -89,11 +80,9 @@ $window->unmap;
 cmd 'open';
 
 $original_rect = X11::XCB::Rect->new(x => 0, y => 0, width => 30, height => 30);
-$window = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
+$window = open_window(
     rect => $original_rect,
-    background_color => 61440,
-    event_mask => [ 'structure_notify' ],
+    dont_map => 1,
 );
 
 is_deeply($window->rect, $original_rect, "rect unmodified before mapping");
@@ -101,10 +90,10 @@ is_deeply($window->rect, $original_rect, "rect unmodified before mapping");
 $window->fullscreen(1);
 $window->map;
 
-wait_for_map $x;
+wait_for_map $window;
 
 $new_rect = $window->rect;
-ok(!eq_deeply($new_rect, $original_rect), "Window got repositioned after fullscreen");
+ok(!eq_hash($new_rect, $original_rect), "Window got repositioned after fullscreen");
 ok($window->mapped, "Window is mapped after opening it in fullscreen mode");
 
 $wrect = $new_rect;
@@ -115,35 +104,34 @@ ok(($wrect->{y} - $orect->{y}) < $threshold, 'y coordinate fullscreen');
 ok(abs($wrect->{width} - $orect->{width}) < $threshold, 'width coordinate fullscreen');
 ok(abs($wrect->{height} - $orect->{height}) < $threshold, 'height coordinate fullscreen');
 
-###############################################################################
-# test if setting two windows in fullscreen mode at the same time does not work
-###############################################################################
+################################################################################
+# Verify that when one window wants to go into fullscreen mode, the old
+# fullscreen window will be replaced.
+################################################################################
 
 $original_rect = X11::XCB::Rect->new(x => 0, y => 0, width => 30, height => 30);
-my $swindow = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
+my $swindow = open_window(
     rect => $original_rect,
-    background_color => '#C0C0C0',
-    event_mask => [ 'structure_notify' ],
+    dont_map => 1,
 );
 
 $swindow->map;
 
-sync_with_i3($x);
+sync_with_i3;
 
 ok(!$swindow->mapped, 'window not mapped while fullscreen window active');
 
 $new_rect = $swindow->rect;
-ok(!eq_deeply($new_rect, $original_rect), "Window got repositioned");
+ok(!eq_hash($new_rect, $original_rect), "Window got repositioned");
 
 $swindow->fullscreen(1);
-sync_with_i3($x);
+sync_with_i3;
 
 is(fullscreen_windows(), 1, 'amount of fullscreen windows');
 
 $window->fullscreen(0);
-sync_with_i3($x);
-is(fullscreen_windows(), 0, 'amount of fullscreen windows');
+sync_with_i3;
+is(fullscreen_windows(), 1, 'amount of fullscreen windows');
 
 ok($swindow->mapped, 'window mapped after other fullscreen ended');
 
@@ -154,7 +142,7 @@ ok($swindow->mapped, 'window mapped after other fullscreen ended');
 ###########################################################################
 
 $swindow->fullscreen(0);
-sync_with_i3($x);
+sync_with_i3;
 
 is(fullscreen_windows(), 0, 'amount of fullscreen windows after disabling');
 

@@ -49,12 +49,12 @@ xcb_connection_t *xcb_connection;
 int              screen;
 xcb_screen_t     *xcb_screen;
 xcb_window_t     xcb_root;
-xcb_font_t       xcb_font;
 
-/* We need to cache some data to speed up text-width-prediction */
-xcb_query_font_reply_t *font_info;
-int                    font_height;
-xcb_charinfo_t         *font_table;
+/* This is needed for integration with libi3 */
+xcb_connection_t *conn;
+
+/* The font we'll use */
+static i3Font font;
 
 /* These are only relevant for XKB, which we only need for grabbing modifiers */
 Display          *xkb_dpy;
@@ -80,12 +80,16 @@ struct xcb_colors_t {
     uint32_t bar_bg;
     uint32_t active_ws_fg;
     uint32_t active_ws_bg;
+    uint32_t active_ws_border;
     uint32_t inactive_ws_fg;
     uint32_t inactive_ws_bg;
+    uint32_t inactive_ws_border;
     uint32_t urgent_ws_bg;
     uint32_t urgent_ws_fg;
+    uint32_t urgent_ws_border;
     uint32_t focus_ws_bg;
     uint32_t focus_ws_fg;
+    uint32_t focus_ws_border;
 };
 struct xcb_colors_t colors;
 
@@ -101,99 +105,55 @@ int _xcb_request_failed(xcb_void_cookie_t cookie, char *err_msg, int line) {
 }
 
 /*
- * Predicts the length of text based on cached data.
- * The string has to be encoded in ucs2 and glyph_len has to be the length
- * of the string (in glyphs).
- *
- */
-uint32_t predict_text_extents(xcb_char2b_t *text, uint32_t length) {
-    /* If we don't have per-character data, return the maximum width */
-    if (font_table == NULL) {
-        return (font_info->max_bounds.character_width * length);
-    }
-
-    uint32_t width = 0;
-    uint32_t i;
-
-    for (i = 0; i < length; i++) {
-        xcb_charinfo_t *info;
-        int row = text[i].byte1;
-        int col = text[i].byte2;
-
-        if (row < font_info->min_byte1 || row > font_info->max_byte1 ||
-            col < font_info->min_char_or_byte2 || col > font_info->max_char_or_byte2) {
-            continue;
-        }
-
-        /* Don't you ask me, how this one works… */
-        info = &font_table[((row - font_info->min_byte1) *
-                            (font_info->max_char_or_byte2 - font_info->min_char_or_byte2 + 1)) +
-                           (col - font_info->min_char_or_byte2)];
-
-        if (info->character_width != 0 ||
-            (info->right_side_bearing |
-             info->left_side_bearing |
-             info->ascent |
-             info->descent) != 0) {
-            width += info->character_width;
-        }
-    }
-
-    return width;
-}
-
-/*
- * Draws text given in UCS-2-encoding to a given drawable and position
- *
- */
-void draw_text(xcb_drawable_t drawable, xcb_gcontext_t ctx, int16_t x, int16_t y,
-               xcb_char2b_t *text, uint32_t glyph_count) {
-    int offset = 0;
-    int16_t pos_x = x;
-    int16_t font_ascent = font_info->font_ascent;
-
-    while (glyph_count > 0) {
-        uint8_t chunk_size = MIN(255, glyph_count);
-        uint32_t chunk_width = predict_text_extents(text + offset, chunk_size);
-
-        xcb_image_text_16(xcb_connection,
-                          chunk_size,
-                          drawable,
-                          ctx,
-                          pos_x, y + font_ascent,
-                          text + offset);
-
-        offset += chunk_size;
-        pos_x += chunk_width;
-        glyph_count -= chunk_size;
-    }
-}
-
-/*
  * Redraws the statusline to the buffer
  *
  */
 void refresh_statusline() {
-    int glyph_count;
+    struct status_block *block;
 
-    if (statusline == NULL) {
-        return;
+    uint32_t old_statusline_width = statusline_width;
+    statusline_width = 0;
+
+    /* Convert all blocks from UTF-8 to UCS-2 and predict the text width (in
+     * pixels). */
+    TAILQ_FOREACH(block, &statusline_head, blocks) {
+        block->ucs2_full_text = (xcb_char2b_t*)convert_utf8_to_ucs2(block->full_text, &(block->glyph_count_full_text));
+        block->width = predict_text_width((char*)block->ucs2_full_text, block->glyph_count_full_text, true);
+        /* If this is not the last block, add some pixels for a separator. */
+        if (TAILQ_NEXT(block, blocks) != NULL)
+            block->width += 9;
+        statusline_width += block->width;
     }
 
-    xcb_char2b_t *text = (xcb_char2b_t*) convert_utf8_to_ucs2(statusline, &glyph_count);
-    uint32_t old_statusline_width = statusline_width;
-    statusline_width = predict_text_extents(text, glyph_count);
     /* If the statusline is bigger than our screen we need to make sure that
      * the pixmap provides enough space, so re-allocate if the width grew */
     if (statusline_width > xcb_screen->width_in_pixels &&
         statusline_width > old_statusline_width)
         realloc_sl_buffer();
 
-    xcb_rectangle_t rect = { 0, 0, xcb_screen->width_in_pixels, font_height };
+    /* Clear the statusline pixmap. */
+    xcb_rectangle_t rect = { 0, 0, xcb_screen->width_in_pixels, font.height };
     xcb_poly_fill_rectangle(xcb_connection, statusline_pm, statusline_clear, 1, &rect);
-    draw_text(statusline_pm, statusline_ctx, 0, 0, text, glyph_count);
 
-    FREE(text);
+    /* Draw the text of each block. */
+    uint32_t x = 0;
+    TAILQ_FOREACH(block, &statusline_head, blocks) {
+        uint32_t colorpixel = (block->color ? get_colorpixel(block->color) : colors.bar_fg);
+        set_font_colors(statusline_ctx, colorpixel, colors.bar_bg);
+        draw_text((char*)block->ucs2_full_text, block->glyph_count_full_text,
+                  true, statusline_pm, statusline_ctx, x, 0, block->width);
+        x += block->width;
+
+        if (TAILQ_NEXT(block, blocks) != NULL) {
+            /* This is not the last block, draw a separator. */
+            set_font_colors(statusline_ctx, get_colorpixel("#666666"), colors.bar_bg);
+            xcb_poly_line(xcb_connection, XCB_COORD_MODE_ORIGIN, statusline_pm,
+                          statusline_ctx, 2,
+                          (xcb_point_t[]){ { x - 5, 2 }, { x - 5, font.height - 2 } });
+        }
+
+        FREE(block->ucs2_full_text);
+    }
 }
 
 /*
@@ -243,9 +203,9 @@ void unhide_bars() {
         values[0] = walk->rect.x;
         if (config.position == POS_TOP)
             values[1] = walk->rect.y;
-        else values[1] = walk->rect.y + walk->rect.h - font_height - 6;
+        else values[1] = walk->rect.y + walk->rect.h - font.height - 6;
         values[2] = walk->rect.w;
-        values[3] = font_height + 6;
+        values[3] = font.height + 6;
         values[4] = XCB_STACK_MODE_ABOVE;
         DLOG("Reconfiguring Window for output %s to %d,%d\n", walk->name, values[0], values[1]);
         cookie = xcb_configure_window_checked(xcb_connection,
@@ -273,12 +233,16 @@ void init_colors(const struct xcb_color_strings_t *new_colors) {
     PARSE_COLOR(bar_bg, "#000000");
     PARSE_COLOR(active_ws_fg, "#FFFFFF");
     PARSE_COLOR(active_ws_bg, "#333333");
+    PARSE_COLOR(active_ws_border, "#333333");
     PARSE_COLOR(inactive_ws_fg, "#888888");
     PARSE_COLOR(inactive_ws_bg, "#222222");
+    PARSE_COLOR(inactive_ws_border, "#333333");
     PARSE_COLOR(urgent_ws_fg, "#FFFFFF");
     PARSE_COLOR(urgent_ws_bg, "#900000");
+    PARSE_COLOR(urgent_ws_border, "#2f343a");
     PARSE_COLOR(focus_ws_fg, "#FFFFFF");
     PARSE_COLOR(focus_ws_bg, "#285577");
+    PARSE_COLOR(focus_ws_border, "#4c7899");
 #undef PARSE_COLOR
 }
 
@@ -327,10 +291,10 @@ void handle_button(xcb_button_press_event_t *event) {
              * and set cur_ws accordingly */
             TAILQ_FOREACH(cur_ws, walk->workspaces, tailq) {
                 DLOG("x = %d\n", x);
-                if (x < cur_ws->name_width + 10) {
+                if (x >= 0 && x < cur_ws->name_width + 10) {
                     break;
                 }
-                x -= cur_ws->name_width + 10;
+                x -= cur_ws->name_width + 11;
             }
             if (cur_ws == NULL) {
                 return;
@@ -354,10 +318,36 @@ void handle_button(xcb_button_press_event_t *event) {
             break;
     }
 
-    const size_t len = strlen(cur_ws->name) + strlen("workspace \"\"") + 1;
-    char buffer[len];
-    snprintf(buffer, len, "workspace \"%s\"", cur_ws->name);
+    /* To properly handle workspace names with double quotes in them, we need
+     * to escape the double quotes. Unfortunately, that’s rather ugly in C: We
+     * first count the number of double quotes, then we allocate a large enough
+     * buffer, then we copy character by character. */
+    int num_quotes = 0;
+    size_t namelen = 0;
+    for (char *walk = cur_ws->name; *walk != '\0'; walk++) {
+        if (*walk == '"')
+            num_quotes++;
+        /* While we’re looping through the name anyway, we can save one
+         * strlen(). */
+        namelen++;
+    }
+
+    const size_t len = namelen + strlen("workspace \"\"") + 1;
+    char *buffer = scalloc(len+num_quotes);
+    strncpy(buffer, "workspace \"", strlen("workspace \""));
+    int inpos, outpos;
+    for (inpos = 0, outpos = strlen("workspace \"");
+         inpos < namelen;
+         inpos++, outpos++) {
+        if (cur_ws->name[inpos] == '"') {
+            buffer[outpos] = '\\';
+            outpos++;
+        }
+        buffer[outpos] = cur_ws->name[inpos];
+    }
+    buffer[outpos] = '"';
     i3_send_msg(I3_IPC_MESSAGE_TYPE_COMMAND, buffer);
+    free(buffer);
 }
 
 /*
@@ -379,8 +369,8 @@ static void configure_trayclients() {
             clients++;
 
             DLOG("Configuring tray window %08x to x=%d\n",
-                 trayclient->win, output->rect.w - (clients * (font_height + 2)));
-            uint32_t x = output->rect.w - (clients * (font_height + 2));
+                 trayclient->win, output->rect.w - (clients * (font.height + 2)));
+            uint32_t x = output->rect.w - (clients * (font.height + 2));
             xcb_configure_window(xcb_connection,
                                  trayclient->win,
                                  XCB_CONFIG_WINDOW_X,
@@ -423,17 +413,24 @@ static void handle_client_message(xcb_client_message_event_t* event) {
             bool map_it = true;
             int xe_version = 1;
             xcb_get_property_cookie_t xembedc;
-            xembedc = xcb_get_property_unchecked(xcb_connection,
-                                                 0,
-                                                 client,
-                                                 atoms[_XEMBED_INFO],
-                                                 XCB_GET_PROPERTY_TYPE_ANY,
-                                                 0,
-                                                 2 * 32);
+            xcb_generic_error_t *error;
+            xembedc = xcb_get_property(xcb_connection,
+                                       0,
+                                       client,
+                                       atoms[_XEMBED_INFO],
+                                       XCB_GET_PROPERTY_TYPE_ANY,
+                                       0,
+                                       2 * 32);
 
             xcb_get_property_reply_t *xembedr = xcb_get_property_reply(xcb_connection,
                                                                        xembedc,
-                                                                       NULL);
+                                                                       &error);
+            if (error != NULL) {
+                ELOG("Error getting _XEMBED_INFO property: error_code %d\n",
+                     error->error_code);
+                free(error);
+                return;
+            }
             if (xembedr != NULL && xembedr->length != 0) {
                 DLOG("xembed format = %d, len = %d\n", xembedr->format, xembedr->length);
                 uint32_t *xembed = xcb_get_property_value(xembedr);
@@ -453,11 +450,26 @@ static void handle_client_message(xcb_client_message_event_t* event) {
             SLIST_FOREACH(walk, outputs, slist) {
                 if (!walk->active)
                     continue;
-                if (config.tray_output &&
-                    strcasecmp(walk->name, config.tray_output) != 0)
-                    continue;
+                if (config.tray_output) {
+                    if ((strcasecmp(walk->name, config.tray_output) != 0) &&
+                        (!walk->primary || strcasecmp("primary", config.tray_output) != 0))
+                        continue;
+                }
+
                 DLOG("using output %s\n", walk->name);
                 output = walk;
+                break;
+            }
+            /* In case of tray_output == primary and there is no primary output
+             * configured, we fall back to the first available output. */
+            if (output == NULL && strcasecmp("primary", config.tray_output) == 0) {
+                SLIST_FOREACH(walk, outputs, slist) {
+                    if (!walk->active)
+                        continue;
+                    DLOG("Falling back to output %s because no primary output is configured\n", walk->name);
+                    output = walk;
+                    break;
+                }
             }
             if (output == NULL) {
                 ELOG("No output found\n");
@@ -466,7 +478,7 @@ static void handle_client_message(xcb_client_message_event_t* event) {
             xcb_reparent_window(xcb_connection,
                                 client,
                                 output->bar,
-                                output->rect.w - font_height - 2,
+                                output->rect.w - font.height - 2,
                                 2);
             /* We reconfigure the window to use a reasonable size. The systray
              * specification explicitly says:
@@ -474,8 +486,8 @@ static void handle_client_message(xcb_client_message_event_t* event) {
              *   should do their best to cope with any size effectively
              */
             mask = XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-            values[0] = font_height;
-            values[1] = font_height;
+            values[0] = font.height;
+            values[1] = font.height;
             xcb_configure_window(xcb_connection,
                                  client,
                                  mask,
@@ -650,10 +662,10 @@ static void handle_configure_request(xcb_configure_request_event_t *event) {
                 continue;
 
             xcb_rectangle_t rect;
-            rect.x = output->rect.w - (clients * (font_height + 2));
+            rect.x = output->rect.w - (clients * (font.height + 2));
             rect.y = 2;
-            rect.width = font_height;
-            rect.height = font_height;
+            rect.width = font.height;
+            rect.height = font.height;
 
             DLOG("This is a tray window. x = %d\n", rect.x);
             fake_configure_notify(xcb_connection, rect, event->window, 0);
@@ -752,19 +764,47 @@ void xkb_io_cb(struct ev_loop *loop, ev_io *watcher, int revents) {
         }
 
         unsigned int mods = ev.state.mods;
-        modstate = mods & Mod4Mask;
+        modstate = mods & config.modifier;
     }
+
+#define DLOGMOD(modmask, status, barfunc) \
+    do { \
+        switch (modmask) { \
+            case ShiftMask: \
+                DLOG("ShiftMask got " #status "!\n"); \
+                break; \
+            case ControlMask: \
+                DLOG("ControlMask got " #status "!\n"); \
+                break; \
+            case Mod1Mask: \
+                DLOG("Mod1Mask got " #status "!\n"); \
+                break; \
+            case Mod2Mask: \
+                DLOG("Mod2Mask got " #status "!\n"); \
+                break; \
+            case Mod3Mask: \
+                DLOG("Mod3Mask got " #status "!\n"); \
+                break; \
+            case Mod4Mask: \
+                DLOG("Mod4Mask got " #status "!\n"); \
+                break; \
+            case Mod5Mask: \
+                DLOG("Mod5Mask got " #status "!\n"); \
+                break; \
+        } \
+        barfunc(); \
+    } while (0)
 
     if (modstate != mod_pressed) {
         if (modstate == 0) {
-            DLOG("Mod4 got released!\n");
-            hide_bars();
+            DLOGMOD(config.modifier, released, hide_bars);
         } else {
-            DLOG("Mod4 got pressed!\n");
-            unhide_bars();
+            DLOGMOD(config.modifier, pressed, unhide_bars);
         }
         mod_pressed = modstate;
     }
+
+#undef DLOGMOD
 }
 
 /*
@@ -779,6 +819,7 @@ char *init_xcb_early() {
         ELOG("Cannot open display\n");
         exit(EXIT_FAILURE);
     }
+    conn = xcb_connection;
     DLOG("Connected to xcb\n");
 
     /* We have to request the atoms we need */
@@ -800,14 +841,12 @@ char *init_xcb_early() {
                                                                mask,
                                                                vals);
 
-    mask |= XCB_GC_BACKGROUND;
-    vals[0] = colors.bar_fg;
     statusline_ctx = xcb_generate_id(xcb_connection);
     xcb_void_cookie_t sl_ctx_cookie = xcb_create_gc_checked(xcb_connection,
                                                             statusline_ctx,
                                                             xcb_root,
-                                                            mask,
-                                                            vals);
+                                                            0,
+                                                            NULL);
 
     statusline_pm = xcb_generate_id(xcb_connection);
     xcb_void_cookie_t sl_pm_cookie = xcb_create_pixmap_checked(xcb_connection,
@@ -870,29 +909,13 @@ char *init_xcb_early() {
  *
  */
 void init_xcb_late(char *fontname) {
-    if (fontname == NULL) {
-        /* XXX: font fallback to 'misc' like i3 does it would be good. */
+    if (fontname == NULL)
         fontname = "-misc-fixed-medium-r-normal--13-120-75-75-C-70-iso10646-1";
-    }
 
-    /* We load and allocate the font */
-    xcb_font = xcb_generate_id(xcb_connection);
-    xcb_void_cookie_t open_font_cookie;
-    open_font_cookie = xcb_open_font_checked(xcb_connection,
-                                             xcb_font,
-                                             strlen(fontname),
-                                             fontname);
-
-    /* We need to save info about the font, because we need the font's height and
-     * information about the width of characters */
-    xcb_query_font_cookie_t query_font_cookie;
-    query_font_cookie = xcb_query_font(xcb_connection,
-                                       xcb_font);
-
-    xcb_change_gc(xcb_connection,
-                  statusline_ctx,
-                  XCB_GC_FONT,
-                  (uint32_t[]){ xcb_font });
+    /* Load the font */
+    font = load_font(fontname, true);
+    set_font(&font);
+    DLOG("Calculated Font-height: %d\n", font.height);
 
     xcb_flush(xcb_connection);
 
@@ -937,25 +960,6 @@ void init_xcb_late(char *fontname) {
         ev_io_start(main_loop, xkb_io);
         XFlush(xkb_dpy);
     }
-
-    /* Now we save the font-infos */
-    font_info = xcb_query_font_reply(xcb_connection,
-                                     query_font_cookie,
-                                     NULL);
-
-    if (xcb_request_failed(open_font_cookie, "Could not open font")) {
-        exit(EXIT_FAILURE);
-    }
-
-    font_height = font_info->font_ascent + font_info->font_descent;
-
-    if (xcb_query_font_char_infos_length(font_info) == 0) {
-        font_table = NULL;
-    } else {
-        font_table = xcb_query_font_char_infos(font_info);
-    }
-
-    DLOG("Calculated Font-height: %d\n", font_height);
 }
 
 /*
@@ -1055,18 +1059,8 @@ void init_tray() {
  */
 void clean_xcb() {
     i3_output *o_walk;
-    trayclient *trayclient;
     free_workspaces();
     SLIST_FOREACH(o_walk, outputs, slist) {
-        TAILQ_FOREACH(trayclient, o_walk->trayclients, tailq) {
-            /* Unmap, then reparent (to root) the tray client windows */
-            xcb_unmap_window(xcb_connection, trayclient->win);
-            xcb_reparent_window(xcb_connection,
-                                trayclient->win,
-                                xcb_root,
-                                0,
-                                0);
-        }
         destroy_window(o_walk);
         FREE(o_walk->trayclients);
         FREE(o_walk->workspaces);
@@ -1085,7 +1079,6 @@ void clean_xcb() {
     FREE(xcb_chk);
     FREE(xcb_prep);
     FREE(xcb_io);
-    FREE(font_info);
 }
 
 /*
@@ -1107,6 +1100,33 @@ void get_atoms() {
 }
 
 /*
+ * Reparents all tray clients of the specified output to the root window. This
+ * is either used when shutting down, when an output appears (xrandr --output
+ * VGA1 --off) or when the primary output changes.
+ *
+ * Applications using the tray will start the protocol from the beginning again
+ * afterwards.
+ *
+ */
+void kick_tray_clients(i3_output *output) {
+    trayclient *trayclient;
+    while (!TAILQ_EMPTY(output->trayclients)) {
+        trayclient = TAILQ_FIRST(output->trayclients);
+        /* Unmap, then reparent (to root) the tray client windows */
+        xcb_unmap_window(xcb_connection, trayclient->win);
+        xcb_reparent_window(xcb_connection,
+                            trayclient->win,
+                            xcb_root,
+                            0,
+                            0);
+
+        /* We remove the trayclient right here. We might receive an UnmapNotify
+         * event afterwards, but better safe than sorry. */
+        TAILQ_REMOVE(output->trayclients, trayclient, tailq);
+    }
+}
+
+/*
  * Destroy the bar of the specified output
  *
  */
@@ -1117,6 +1137,8 @@ void destroy_window(i3_output *output) {
     if (output->bar == XCB_NONE) {
         return;
     }
+
+    kick_tray_clients(output);
     xcb_destroy_window(xcb_connection, output->bar);
     output->bar = XCB_NONE;
 }
@@ -1138,7 +1160,7 @@ void realloc_sl_buffer() {
                                                                xcb_screen->height_in_pixels);
 
     uint32_t mask = XCB_GC_FOREGROUND;
-    uint32_t vals[3] = { colors.bar_bg, colors.bar_bg, xcb_font };
+    uint32_t vals[2] = { colors.bar_bg, colors.bar_bg };
     xcb_free_gc(xcb_connection, statusline_clear);
     statusline_clear = xcb_generate_id(xcb_connection);
     xcb_void_cookie_t clear_ctx_cookie = xcb_create_gc_checked(xcb_connection,
@@ -1147,7 +1169,7 @@ void realloc_sl_buffer() {
                                                                mask,
                                                                vals);
 
-    mask |= XCB_GC_BACKGROUND | XCB_GC_FONT;
+    mask |= XCB_GC_BACKGROUND;
     vals[0] = colors.bar_fg;
     statusline_ctx = xcb_generate_id(xcb_connection);
     xcb_free_gc(xcb_connection, statusline_ctx);
@@ -1208,8 +1230,8 @@ void reconfig_windows() {
                                                                      xcb_screen->root_depth,
                                                                      walk->bar,
                                                                      xcb_root,
-                                                                     walk->rect.x, walk->rect.y + walk->rect.h - font_height - 6,
-                                                                     walk->rect.w, font_height + 6,
+                                                                     walk->rect.x, walk->rect.y + walk->rect.h - font.height - 6,
+                                                                     walk->rect.w, font.height + 6,
                                                                      1,
                                                                      XCB_WINDOW_CLASS_INPUT_OUTPUT,
                                                                      xcb_screen->root_visual,
@@ -1283,12 +1305,12 @@ void reconfig_windows() {
                 case POS_NONE:
                     break;
                 case POS_TOP:
-                    strut_partial.top = font_height + 6;
+                    strut_partial.top = font.height + 6;
                     strut_partial.top_start_x = walk->rect.x;
                     strut_partial.top_end_x = walk->rect.x + walk->rect.w;
                     break;
                 case POS_BOT:
-                    strut_partial.bottom = font_height + 6;
+                    strut_partial.bottom = font.height + 6;
                     strut_partial.bottom_start_x = walk->rect.x;
                     strut_partial.bottom_end_x = walk->rect.x + walk->rect.w;
                     break;
@@ -1305,13 +1327,11 @@ void reconfig_windows() {
             /* We also want a graphics-context for the bars (it defines the properties
              * with which we draw to them) */
             walk->bargc = xcb_generate_id(xcb_connection);
-            mask = XCB_GC_FONT;
-            values[0] = xcb_font;
             xcb_void_cookie_t gc_cookie = xcb_create_gc_checked(xcb_connection,
                                                                 walk->bargc,
                                                                 walk->bar,
-                                                                mask,
-                                                                values);
+                                                                0,
+                                                                NULL);
 
             /* We finally map the bar (display it on screen), unless the modifier-switch is on */
             xcb_void_cookie_t map_cookie;
@@ -1344,9 +1364,9 @@ void reconfig_windows() {
                    XCB_CONFIG_WINDOW_HEIGHT |
                    XCB_CONFIG_WINDOW_STACK_MODE;
             values[0] = walk->rect.x;
-            values[1] = walk->rect.y + walk->rect.h - font_height - 6;
+            values[1] = walk->rect.y + walk->rect.h - font.height - 6;
             values[2] = walk->rect.w;
-            values[3] = font_height + 6;
+            values[3] = font.height + 6;
             values[4] = XCB_STACK_MODE_ABOVE;
 
             DLOG("Destroying buffer for output %s", walk->name);
@@ -1402,14 +1422,14 @@ void draw_bars() {
                       outputs_walk->bargc,
                       XCB_GC_FOREGROUND,
                       &color);
-        xcb_rectangle_t rect = { 0, 0, outputs_walk->rect.w, font_height + 6 };
+        xcb_rectangle_t rect = { 0, 0, outputs_walk->rect.w, font.height + 6 };
         xcb_poly_fill_rectangle(xcb_connection,
                                 outputs_walk->buffer,
                                 outputs_walk->bargc,
                                 1,
                                 &rect);
 
-        if (statusline != NULL) {
+        if (!TAILQ_EMPTY(&statusline_head)) {
             DLOG("Printing statusline!\n");
 
             /* Luckily we already prepared a seperate pixmap containing the rendered
@@ -1423,7 +1443,7 @@ void draw_bars() {
                 /* We assume the tray icons are quadratic (we use the font
                  * *height* as *width* of the icons) because we configured them
                  * like this. */
-                traypx += font_height + 2;
+                traypx += font.height + 2;
             }
             /* Add 2px of padding if there are any tray icons */
             if (traypx > 0)
@@ -1434,7 +1454,7 @@ void draw_bars() {
                           outputs_walk->bargc,
                           MAX(0, (int16_t)(statusline_width - outputs_walk->rect.w + 4)), 0,
                           MAX(0, (int16_t)(outputs_walk->rect.w - statusline_width - traypx - 4)), 3,
-                          MIN(outputs_walk->rect.w - traypx - 4, statusline_width), font_height);
+                          MIN(outputs_walk->rect.w - traypx - 4, statusline_width), font.height);
         }
 
         if (config.disable_ws) {
@@ -1443,48 +1463,56 @@ void draw_bars() {
 
         i3_ws *ws_walk;
         TAILQ_FOREACH(ws_walk, outputs_walk->workspaces, tailq) {
-            DLOG("Drawing Button for WS %s at x = %d\n", ws_walk->name, i);
+            DLOG("Drawing Button for WS %s at x = %d, len = %d\n", ws_walk->name, i, ws_walk->name_width);
             uint32_t fg_color = colors.inactive_ws_fg;
             uint32_t bg_color = colors.inactive_ws_bg;
+            uint32_t border_color = colors.inactive_ws_border;
             if (ws_walk->visible) {
                 if (!ws_walk->focused) {
                     fg_color = colors.active_ws_fg;
                     bg_color = colors.active_ws_bg;
+                    border_color = colors.active_ws_border;
                 } else {
                     fg_color = colors.focus_ws_fg;
                     bg_color = colors.focus_ws_bg;
+                    border_color = colors.focus_ws_border;
                 }
             }
             if (ws_walk->urgent) {
                 DLOG("WS %s is urgent!\n", ws_walk->name);
                 fg_color = colors.urgent_ws_fg;
                 bg_color = colors.urgent_ws_bg;
+                border_color = colors.urgent_ws_border;
                 /* The urgent-hint should get noticed, so we unhide the bars shortly */
                 unhide_bars();
             }
             uint32_t mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
+            uint32_t vals_border[] = { border_color, border_color };
+            xcb_change_gc(xcb_connection,
+                          outputs_walk->bargc,
+                          mask,
+                          vals_border);
+            xcb_rectangle_t rect_border = { i, 0, ws_walk->name_width + 10, font.height + 4 };
+            xcb_poly_fill_rectangle(xcb_connection,
+                                    outputs_walk->buffer,
+                                    outputs_walk->bargc,
+                                    1,
+                                    &rect_border);
             uint32_t vals[] = { bg_color, bg_color };
             xcb_change_gc(xcb_connection,
                           outputs_walk->bargc,
                           mask,
                           vals);
-            xcb_rectangle_t rect = { i + 1, 1, ws_walk->name_width + 8, font_height + 4 };
+            xcb_rectangle_t rect = { i + 1, 1, ws_walk->name_width + 8, font.height + 2 };
             xcb_poly_fill_rectangle(xcb_connection,
                                     outputs_walk->buffer,
                                     outputs_walk->bargc,
                                     1,
                                     &rect);
-            xcb_change_gc(xcb_connection,
-                          outputs_walk->bargc,
-                          XCB_GC_FOREGROUND,
-                          &fg_color);
-            xcb_image_text_16(xcb_connection,
-                              ws_walk->name_glyphs,
-                              outputs_walk->buffer,
-                              outputs_walk->bargc,
-                              i + 5, font_info->font_ascent + 2,
-                              ws_walk->ucs2_name);
-            i += 10 + ws_walk->name_width;
+            set_font_colors(outputs_walk->bargc, fg_color, bg_color);
+            draw_text((char*)ws_walk->ucs2_name, ws_walk->name_glyphs, true,
+                    outputs_walk->buffer, outputs_walk->bargc, i + 5, 2, ws_walk->name_width);
+            i += 10 + ws_walk->name_width + 1;
         }
 
         i = 0;

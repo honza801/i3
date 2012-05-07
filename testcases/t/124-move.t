@@ -8,9 +8,7 @@
 # 4) move a container in a different direction so that we need to go up in tree
 #
 use i3test;
-use X11::XCB::Connection;
 
-my $x = X11::XCB::Connection->new;
 my $i3 = i3(get_socket_path());
 
 my $tmp = fresh_workspace;
@@ -138,7 +136,7 @@ is(@{$content}, 1, 'only one nodes on this workspace');
 ######################################################################
 
 $tmp = fresh_workspace;
-my $floatwin = open_floating_window($x);
+my $floatwin = open_floating_window;
 my ($absolute_before, $top_before) = $floatwin->rect;
 
 cmd 'move left';
@@ -197,11 +195,34 @@ cmd 'move left 20 px';
 
 ($absolute, $top) = $floatwin->rect;
 
-is($absolute->x, ($absolute_before->x - 20), 'moved 10 px to the left');
+is($absolute->x, ($absolute_before->x - 20), 'moved 20 px to the left');
 is($absolute->y, $absolute_before->y, 'y not changed');
 is($absolute->width, $absolute_before->width, 'width not changed');
 is($absolute->height, $absolute_before->height, 'height not changed');
 
+######################################################################
+# 6) test moving floating window to a specified position
+#    and to absolute center
+######################################################################
 
+$tmp = fresh_workspace;
+open_floating_window; my @floatcon;
+
+cmd 'move position 5 px 15 px';
+
+@floatcon = @{get_ws($tmp)->{floating_nodes}};
+
+is($floatcon[0]->{rect}->{x}, 5, 'moved to position 5 x');
+is($floatcon[0]->{rect}->{y}, 15, 'moved to position 15 y');
+
+cmd 'move absolute position center';
+
+@floatcon = @{get_ws($tmp)->{floating_nodes}};
+
+my $center_x = int($x->root->rect->width/2) - int($floatcon[0]->{rect}->{width}/2);
+my $center_y = int($x->root->rect->height/2) - int($floatcon[0]->{rect}->{height}/2);
+
+is($floatcon[0]->{rect}->{x}, $center_x, "moved to center at position $center_x x");
+is($floatcon[0]->{rect}->{y}, $center_y, "moved to center at position $center_y y");
 
 done_testing;

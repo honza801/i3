@@ -2,7 +2,7 @@
  * vim:ts=4:sw=4:expandtab
  *
  * i3 - an improved dynamic tiling window manager
- * © 2009-2011 Michael Stapelberg and contributors (see also: LICENSE)
+ * © 2009-2012 Michael Stapelberg and contributors (see also: LICENSE)
  *
  * ipc.c: UNIX domain socket IPC (initialization, client handling, protocol).
  *
@@ -97,7 +97,7 @@ void ipc_send_event(const char *event, uint32_t message_type, const char *payloa
  * when exiting or restarting only!
  *
  */
-void ipc_shutdown() {
+void ipc_shutdown(void) {
     ipc_client *current;
     while (!TAILQ_EMPTY(&all_clients)) {
         current = TAILQ_FIRST(&all_clients);
@@ -119,16 +119,24 @@ IPC_HANDLER(command) {
     char *command = scalloc(message_size + 1);
     strncpy(command, (const char*)message, message_size);
     LOG("IPC: received: *%s*\n", command);
-    char *reply = parse_cmd((const char*)command);
-    char *save_reply = reply;
+    struct CommandResult *command_output = parse_command((const char*)command);
     free(command);
 
-    /* If no reply was provided, we just use the default success message */
-    if (reply == NULL)
-        reply = "{\"success\":true}";
-    ipc_send_message(fd, strlen(reply), I3_IPC_REPLY_TYPE_COMMAND, (const uint8_t*)reply);
+    if (command_output->needs_tree_render)
+        tree_render();
 
-    FREE(save_reply);
+    const unsigned char *reply;
+#if YAJL_MAJOR >= 2
+    size_t length;
+#else
+    unsigned int length;
+#endif
+    yajl_gen_get_buf(command_output->json_gen, &reply, &length);
+
+    ipc_send_message(fd, length, I3_IPC_REPLY_TYPE_COMMAND,
+                     (const uint8_t*)reply);
+
+    yajl_gen_free(command_output->json_gen);
 }
 
 static void dump_rect(yajl_gen gen, const char *name, Rect r) {
@@ -163,6 +171,19 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
             break;
         case VERT:
             ystr("vertical");
+            break;
+    }
+
+    ystr("scratchpad_state");
+    switch (con->scratchpad_state) {
+        case SCRATCHPAD_NONE:
+            ystr("none");
+            break;
+        case SCRATCHPAD_FRESH:
+            ystr("fresh");
+            break;
+        case SCRATCHPAD_CHANGED:
+            ystr("changed");
             break;
     }
 
@@ -261,6 +282,22 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
     ystr("fullscreen_mode");
     y(integer, con->fullscreen_mode);
 
+    ystr("floating");
+    switch (con->floating) {
+        case FLOATING_AUTO_OFF:
+            ystr("auto_off");
+            break;
+        case FLOATING_AUTO_ON:
+            ystr("auto_on");
+            break;
+        case FLOATING_USER_OFF:
+            ystr("user_off");
+            break;
+        case FLOATING_USER_ON:
+            ystr("user_on");
+            break;
+    }
+
     ystr("swallows");
     y(array_open);
     Match *match;
@@ -282,6 +319,8 @@ void dump_node(yajl_gen gen, struct Con *con, bool inplace_restart) {
             y(map_open);
             ystr("id");
             y(integer, con->window->id);
+            ystr("restart_mode");
+            y(bool, true);
             y(map_close);
         }
     }
@@ -330,6 +369,8 @@ IPC_HANDLER(get_workspaces) {
 
     Con *output;
     TAILQ_FOREACH(output, &(croot->nodes_head), nodes) {
+        if (output->name[0] == '_' && output->name[1] == '_')
+            continue;
         Con *ws;
         TAILQ_FOREACH(ws, &(output_get_content(output)->nodes_head), nodes) {
             assert(ws->type == CT_WORKSPACE);
@@ -407,6 +448,9 @@ IPC_HANDLER(get_outputs) {
 
         ystr("active");
         y(bool, output->active);
+
+        ystr("primary");
+        y(bool, output->primary);
 
         ystr("rect");
         y(map_open);
@@ -558,6 +602,36 @@ IPC_HANDLER(get_bar_config) {
             ystr("hide");
         else ystr("dock");
 
+        ystr("modifier");
+        switch (config->modifier) {
+            case M_CONTROL:
+                ystr("ctrl");
+                break;
+            case M_SHIFT:
+                ystr("shift");
+                break;
+            case M_MOD1:
+                ystr("Mod1");
+                break;
+            case M_MOD2:
+                ystr("Mod2");
+                break;
+            case M_MOD3:
+                ystr("Mod3");
+                break;
+            /*
+            case M_MOD4:
+                ystr("Mod4");
+                break;
+            */
+            case M_MOD5:
+                ystr("Mod5");
+                break;
+            default:
+                ystr("Mod4");
+                break;
+        }
+
         ystr("position");
         if (config->position == P_BOTTOM)
             ystr("bottom");
@@ -585,14 +659,18 @@ IPC_HANDLER(get_bar_config) {
         y(map_open);
         YSTR_IF_SET(background);
         YSTR_IF_SET(statusline);
-        YSTR_IF_SET(focused_workspace_text);
+        YSTR_IF_SET(focused_workspace_border);
         YSTR_IF_SET(focused_workspace_bg);
-        YSTR_IF_SET(active_workspace_text);
+        YSTR_IF_SET(focused_workspace_text);
+        YSTR_IF_SET(active_workspace_border);
         YSTR_IF_SET(active_workspace_bg);
-        YSTR_IF_SET(inactive_workspace_text);
+        YSTR_IF_SET(active_workspace_text);
+        YSTR_IF_SET(inactive_workspace_border);
         YSTR_IF_SET(inactive_workspace_bg);
-        YSTR_IF_SET(urgent_workspace_text);
+        YSTR_IF_SET(inactive_workspace_text);
+        YSTR_IF_SET(urgent_workspace_border);
         YSTR_IF_SET(urgent_workspace_bg);
+        YSTR_IF_SET(urgent_workspace_text);
         y(map_close);
 
 #undef YSTR_IF_SET
@@ -704,7 +782,7 @@ handler_t handlers[7] = {
     handle_get_outputs,
     handle_tree,
     handle_get_marks,
-    handle_get_bar_config
+    handle_get_bar_config,
 };
 
 /*

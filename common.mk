@@ -2,6 +2,8 @@ UNAME=$(shell uname)
 DEBUG=1
 COVERAGE=0
 INSTALL=install
+FLEX=flex
+BISON=bison
 ifndef PREFIX
   PREFIX=/usr
 endif
@@ -66,6 +68,10 @@ CPPFLAGS += -DPCRE_HAS_UCP=1
 endif
 
 LIBS += -lm
+# Darwin (Mac OS X) doesn’t have librt
+ifneq ($(UNAME),Darwin)
+LIBS += -lrt
+endif
 LIBS += -L $(TOPDIR)/libi3 -li3
 LIBS += $(call ldflags_for_lib, xcb-event,xcb-event)
 LIBS += $(call ldflags_for_lib, xcb-keysyms,xcb-keysyms)

@@ -9,11 +9,49 @@ use v5.10;
 
 our @EXPORT = qw(start_xdummy);
 
+my $x_socketpath = '/tmp/.X11-unix/X';
+
 # reads in a whole file
 sub slurp {
     open(my $fh, '<', shift) or return '';
     local $/;
     <$fh>;
+}
+
+# forks an Xdummy or Xdmx process
+sub fork_xserver {
+    my $displaynum = shift;
+    my $pid = fork();
+    die "Could not fork: $!" unless defined($pid);
+    if ($pid == 0) {
+        # Child, close stdout/stderr, then start Xdummy.
+        close STDOUT;
+        close STDERR;
+
+        exec @_;
+        exit 1;
+    }
+    push(@complete_run::CLEANUP, sub {
+        kill(15, $pid);
+        # Unlink the X11 socket, Xdmx seems to leave it there.
+        unlink($x_socketpath . $displaynum);
+    });
+
+    return $x_socketpath . $displaynum;
+}
+
+# Blocks until the socket paths specified in the given array reference actually
+# exist.
+sub wait_for_x {
+    my ($sockets_waiting) = @_;
+
+    # Wait until Xdmx actually runs. Pretty ugly solution, but as long as we
+    # can’t socket-activate X11…
+    while (1) {
+        @$sockets_waiting = grep { ! -S $_ } @$sockets_waiting;
+        last unless @$sockets_waiting;
+        sleep 0.1;
+    }
 }
 
 =head2 start_xdummy($parallel)
@@ -23,8 +61,9 @@ the file ./Xdummy) and returns two arrayrefs: a list of X11 display numbers to
 the Xdummy processes and a list of PIDs of the processes.
 
 =cut
+
 sub start_xdummy {
-    my ($parallel) = @_;
+    my ($parallel, $numtests) = @_;
 
     my @displays = ();
     my @childpids = ();
@@ -36,47 +75,34 @@ sub start_xdummy {
     # If /proc/cpuinfo does not exist, we fall back to 2 cores.
     $num_cores ||= 2;
 
-    $parallel ||= $num_cores * 2;
+    # If unset, we use num_cores * 2.
+    $parallel ||= ($num_cores * 2);
+
+    # If we are running a small number of tests, don’t over-parallelize.
+    $parallel = $numtests if $numtests < $parallel;
 
     # First get the last used display number, then increment it by one.
     # Effectively falls back to 1 if no X server is running.
-    my ($displaynum) = reverse ('0', sort </tmp/.X11-unix/X*>);
-    $displaynum =~ s/.*(\d)$/$1/;
+    my ($displaynum) = map { /(\d+)$/ } reverse sort glob($x_socketpath . '*');
     $displaynum++;
 
     say "Starting $parallel Xdummy instances, starting at :$displaynum...";
 
-    for my $idx (0 .. ($parallel-1)) {
-        my $pid = fork();
-        die "Could not fork: $!" unless defined($pid);
-        if ($pid == 0) {
-            # Child, close stdout/stderr, then start Xdummy.
-            close STDOUT;
-            close STDERR;
-            # We use -config /dev/null to prevent Xdummy from using the system
-            # Xorg configuration. The tests should be independant from the
-            # actual system X configuration.
-            exec './Xdummy', ":$displaynum", '-config', '/dev/null';
-            exit 1;
-        }
-        push(@childpids, $pid);
+    my @sockets_waiting;
+    for (1 .. $parallel) {
+        # We use -config /dev/null to prevent Xdummy from using the system
+        # Xorg configuration. The tests should be independant from the
+        # actual system X configuration.
+        my $socket = fork_xserver($displaynum, './Xdummy', ":$displaynum",
+                '-config', '/dev/null', '-nolisten', 'tcp');
         push(@displays, ":$displaynum");
+        push(@sockets_waiting, $socket);
         $displaynum++;
     }
 
-    # Wait until the X11 sockets actually appear. Pretty ugly solution, but as
-    # long as we can’t socket-activate X11…
-    my $sockets_ready;
-    do {
-        $sockets_ready = 1;
-        for (@displays) {
-            my $path = "/tmp/.X11-unix/X" . substr($_, 1);
-            $sockets_ready = 0 unless -S $path;
-        }
-        sleep 0.1;
-    } until $sockets_ready;
+    wait_for_x(\@sockets_waiting);
 
-    return \@displays, \@childpids;
+    return @displays;
 }
 
 1

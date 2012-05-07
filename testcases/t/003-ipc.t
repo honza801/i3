@@ -3,8 +3,6 @@
 
 use i3test;
 
-my $x = X11::XCB::Connection->new;
-
 fresh_workspace;
 
 #####################################################################
@@ -12,14 +10,14 @@ fresh_workspace;
 #####################################################################
 
 # Create a window so we can get a focus different from NULL
-my $window = open_window($x);
+my $window = open_window;
 
 my $focus = $x->input_focus;
 
 # Switch to another workspace
 fresh_workspace;
 
-sync_with_i3($x);
+sync_with_i3;
 my $new_focus = $x->input_focus;
 isnt($focus, $new_focus, "Focus changed");
 

@@ -60,7 +60,7 @@ Output *get_output_by_name(const char *name) {
  * Returns the first output which is active.
  *
  */
-Output *get_first_output() {
+Output *get_first_output(void) {
     Output *output;
 
     TAILQ_FOREACH(output, &outputs, outputs)
@@ -319,8 +319,6 @@ void output_init_con(Output *output) {
  *
  */
 void init_ws_for_output(Output *output, Con *content) {
-    char *name;
-
     /* go through all assignments and move the existing workspaces to this output */
     struct Workspace_Assignment *assignment;
     TAILQ_FOREACH(assignment, &ws_assignments, ws_assignments) {
@@ -404,96 +402,7 @@ void init_ws_for_output(Output *output, Con *content) {
 
     /* if there is still no workspace, we create the first free workspace */
     DLOG("Now adding a workspace\n");
-
-    /* add a workspace to this output */
-    Con *out, *current;
-    bool exists = true;
-    Con *ws = con_new(NULL, NULL);
-    ws->type = CT_WORKSPACE;
-
-    /* try the configured workspace bindings first to find a free name */
-    Binding *bind;
-    TAILQ_FOREACH(bind, bindings, bindings) {
-        DLOG("binding with command %s\n", bind->command);
-        if (strlen(bind->command) < strlen("workspace ") ||
-            strncasecmp(bind->command, "workspace", strlen("workspace")) != 0)
-            continue;
-        DLOG("relevant command = %s\n", bind->command);
-        char *target = bind->command + strlen("workspace ");
-        /* We check if this is the workspace next/prev/back_and_forth command.
-         * Beware: The workspace names "next", "prev" and "back_and_forth" are
-         * OK, so we check before stripping the double quotes */
-        if (strncasecmp(target, "next", strlen("next")) == 0 ||
-            strncasecmp(target, "prev", strlen("prev")) == 0 ||
-            strncasecmp(target, "back_and_forth", strlen("back_and_forth")) == 0)
-            continue;
-        if (*target == '"')
-            target++;
-        FREE(ws->name);
-        ws->name = strdup(target);
-        if (ws->name[strlen(ws->name)-1] == '"')
-            ws->name[strlen(ws->name)-1] = '\0';
-        DLOG("trying name *%s*\n", ws->name);
-
-        current = NULL;
-        TAILQ_FOREACH(out, &(croot->nodes_head), nodes)
-            GREP_FIRST(current, output_get_content(out), !strcasecmp(child->name, ws->name));
-
-        exists = (current != NULL);
-        if (!exists) {
-            /* Set ->num to the number of the workspace, if the name actually
-             * is a number or starts with a number */
-            char *endptr = NULL;
-            long parsed_num = strtol(ws->name, &endptr, 10);
-            if (parsed_num == LONG_MIN ||
-                parsed_num == LONG_MAX ||
-                parsed_num < 0 ||
-                endptr == ws->name)
-                ws->num = -1;
-            else ws->num = parsed_num;
-            LOG("Used number %d for workspace with name %s\n", ws->num, ws->name);
-
-            break;
-        }
-    }
-
-    if (exists) {
-        /* get the next unused workspace number */
-        DLOG("Getting next unused workspace by number\n");
-        int c = 0;
-        while (exists) {
-            c++;
-
-            FREE(ws->name);
-            sasprintf(&(ws->name), "%d", c);
-
-            current = NULL;
-            TAILQ_FOREACH(out, &(croot->nodes_head), nodes)
-                GREP_FIRST(current, output_get_content(out), !strcasecmp(child->name, ws->name));
-            exists = (current != NULL);
-
-            DLOG("result for ws %s / %d: exists = %d\n", ws->name, c, exists);
-        }
-        ws->num = c;
-    }
-    con_attach(ws, content, false);
-
-    sasprintf(&name, "[i3 con] workspace %s", ws->name);
-    x_set_name(ws, name);
-    free(name);
-
-    ws->fullscreen_mode = CF_OUTPUT;
-
-    /* If default_orientation is set to NO_ORIENTATION we determine
-     * orientation depending on output resolution. */
-    if (config.default_orientation == NO_ORIENTATION) {
-        ws->orientation = (output->rect.height > output->rect.width) ? VERT : HORIZ;
-        DLOG("Auto orientation. Workspace size set to (%d,%d), setting orientation to %d.\n",
-             output->rect.width, output->rect.height, ws->orientation);
-    } else {
-        ws->orientation = config.default_orientation;
-    }
-
+    Con *ws = create_workspace_on_output(output, content);
 
     /* TODO: Set focus in main.c */
     con_focus(ws);
@@ -630,7 +539,7 @@ static void handle_output(xcb_connection_t *conn, xcb_randr_output_t id,
  * (Re-)queries the outputs via RandR and stores them in the list of outputs.
  *
  */
-void randr_query_outputs() {
+void randr_query_outputs(void) {
     Output *output, *other, *first;
     xcb_randr_get_output_primary_cookie_t pcookie;
     xcb_randr_get_screen_resources_current_cookie_t rcookie;
@@ -760,6 +669,12 @@ void randr_query_outputs() {
                 Con *old_content = output_get_content(output->con);
                 while (!TAILQ_EMPTY(&(old_content->nodes_head))) {
                     current = TAILQ_FIRST(&(old_content->nodes_head));
+                    if (current != next && TAILQ_EMPTY(&(current->focus_head))) {
+                        /* the workspace is empty and not focused, get rid of it */
+                        DLOG("Getting rid of current = %p / %s (empty, unfocused)\n", current, current->name);
+                        tree_close(current, DONT_KILL_WINDOW, false, false);
+                        continue;
+                    }
                     DLOG("Detaching current = %p / %s\n", current, current->name);
                     con_detach(current);
                     DLOG("Re-attaching current = %p / %s\n", current, current->name);

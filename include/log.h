@@ -21,13 +21,15 @@
 
 extern char *loglevels[];
 extern char *errorfilename;
+extern char *shmlogname;
+extern int shmlog_size;
 
 /**
  * Initializes logging by creating an error logfile in /tmp (or
  * XDG_RUNTIME_DIR, see get_process_filename()).
  *
  */
-void init_logging();
+void init_logging(void);
 
 /**
  * Enables the given loglevel.

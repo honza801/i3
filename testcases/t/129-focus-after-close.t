@@ -4,10 +4,7 @@
 # Check if the focus is correctly restored after closing windows.
 #
 use i3test;
-use X11::XCB qw(:all);
 use List::Util qw(first);
-
-my $x = X11::XCB::Connection->new;
 
 my $i3 = i3(get_socket_path());
 
@@ -45,9 +42,8 @@ isnt(get_focused($tmp), $second, 'different container focused');
 ##############################################################
 
 cmd 'kill';
-# TODO: this testcase sometimes has different outcomes when the
-# sleep is missing. why?
-sleep 0.25;
+sync_with_i3;
+
 ($nodes, $focus) = get_ws_content($tmp);
 is($nodes->[1]->{nodes}->[0]->{id}, $second, 'second container found');
 ok($nodes->[1]->{nodes}->[0]->{focused}, 'second container focused');
@@ -102,12 +98,11 @@ $first = open_empty_con($i3);
 $middle = open_empty_con($i3);
 # XXX: the $right empty con will be filled with the x11 window we are creating afterwards
 $right = open_empty_con($i3);
-my $win = open_window($x, { background_color => '#00ff00' });
+my $win = open_window({ background_color => '#00ff00' });
 
 cmd qq|[con_id="$middle"] focus|;
 $win->destroy;
-
-sleep 0.25;
+sync_with_i3;
 
 is(get_focused($tmp), $middle, 'middle container focused');
 

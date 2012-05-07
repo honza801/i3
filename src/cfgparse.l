@@ -37,7 +37,8 @@ int yycolumn = 1;
     yy_push_state(EAT_WHITESPACE); \
 } while (0)
 
-#define BAR_DOUBLE_COLOR do { \
+#define BAR_TRIPLE_COLOR do { \
+    yy_push_state(BAR_COLOR); \
     yy_push_state(BAR_COLOR); \
     yy_push_state(BAR_COLOR); \
 } while (0)
@@ -59,6 +60,7 @@ EOL     (\r?\n)
 %x BUFFER_LINE
 %x BAR
 %x BAR_MODE
+%x BAR_MODIFIER
 %x BAR_POSITION
 %x BAR_COLORS
 %x BAR_COLOR
@@ -88,7 +90,7 @@ EOL     (\r?\n)
 }
 
  /* This part of the lexer handles the bar {} blocks */
-<BAR,BAR_MODE,BAR_POSITION,BAR_COLORS,BAR_COLOR>[ \t]+ { /* ignore whitespace */ ; }
+<BAR,BAR_MODE,BAR_MODIFIER,BAR_POSITION,BAR_COLORS,BAR_COLOR>[ \t]+ { /* ignore whitespace */ ; }
 <BAR>"{"                        { return '{'; }
 <BAR>"}"                        { yy_pop_state(); return '}'; }
 <BAR>^[ \t]*#[^\n]*             { return TOKCOMMENT; }
@@ -98,10 +100,20 @@ EOL     (\r?\n)
 <BAR>mode                       { yy_push_state(BAR_MODE); return TOK_BAR_MODE; }
 <BAR_MODE>hide                  { yy_pop_state(); return TOK_BAR_HIDE; }
 <BAR_MODE>dock                  { yy_pop_state(); return TOK_BAR_DOCK; }
+<BAR>modifier                   { yy_push_state(BAR_MODIFIER); return TOK_BAR_MODIFIER; }
+<BAR_MODIFIER>control           { yy_pop_state(); return TOK_BAR_CONTROL; }
+<BAR_MODIFIER>ctrl              { yy_pop_state(); return TOK_BAR_CONTROL; }
+<BAR_MODIFIER>shift             { yy_pop_state(); return TOK_BAR_SHIFT; }
+<BAR_MODIFIER>Mod1              { yy_pop_state(); return TOK_BAR_MOD1; }
+<BAR_MODIFIER>Mod2              { yy_pop_state(); return TOK_BAR_MOD2; }
+<BAR_MODIFIER>Mod3              { yy_pop_state(); return TOK_BAR_MOD3; }
+<BAR_MODIFIER>Mod4              { yy_pop_state(); return TOK_BAR_MOD4; }
+<BAR_MODIFIER>Mod5              { yy_pop_state(); return TOK_BAR_MOD5; }
 <BAR>position                   { yy_push_state(BAR_POSITION); return TOK_BAR_POSITION; }
 <BAR_POSITION>bottom            { yy_pop_state(); return TOK_BAR_BOTTOM; }
 <BAR_POSITION>top               { yy_pop_state(); return TOK_BAR_TOP; }
 <BAR>status_command             { WS_STRING; return TOK_BAR_STATUS_COMMAND; }
+<BAR>i3bar_command              { WS_STRING; return TOK_BAR_I3BAR_COMMAND; }
 <BAR>font                       { WS_STRING; return TOK_BAR_FONT; }
 <BAR>workspace_buttons          { return TOK_BAR_WORKSPACE_BUTTONS; }
 <BAR>verbose                    { return TOK_BAR_VERBOSE; }
@@ -111,12 +123,18 @@ EOL     (\r?\n)
 <BAR_COLORS>^[ \t]*#[^\n]*      { return TOKCOMMENT; }
 <BAR_COLORS>background          { yy_push_state(BAR_COLOR); return TOK_BAR_COLOR_BACKGROUND; }
 <BAR_COLORS>statusline          { yy_push_state(BAR_COLOR); return TOK_BAR_COLOR_STATUSLINE; }
-<BAR_COLORS>focused_workspace   { BAR_DOUBLE_COLOR; return TOK_BAR_COLOR_FOCUSED_WORKSPACE; }
-<BAR_COLORS>active_workspace    { BAR_DOUBLE_COLOR; return TOK_BAR_COLOR_ACTIVE_WORKSPACE; }
-<BAR_COLORS>inactive_workspace  { BAR_DOUBLE_COLOR; return TOK_BAR_COLOR_INACTIVE_WORKSPACE; }
-<BAR_COLORS>urgent_workspace    { BAR_DOUBLE_COLOR; return TOK_BAR_COLOR_URGENT_WORKSPACE; }
+<BAR_COLORS>focused_workspace   { BAR_TRIPLE_COLOR; return TOK_BAR_COLOR_FOCUSED_WORKSPACE; }
+<BAR_COLORS>active_workspace    { BAR_TRIPLE_COLOR; return TOK_BAR_COLOR_ACTIVE_WORKSPACE; }
+<BAR_COLORS>inactive_workspace  { BAR_TRIPLE_COLOR; return TOK_BAR_COLOR_INACTIVE_WORKSPACE; }
+<BAR_COLORS>urgent_workspace    { BAR_TRIPLE_COLOR; return TOK_BAR_COLOR_URGENT_WORKSPACE; }
 <BAR_COLOR>#[0-9a-fA-F]+        { yy_pop_state(); yylval.string = sstrdup(yytext); return HEXCOLOR; }
-<BAR,BAR_COLORS,BAR_MODE,BAR_POSITION>[a-zA-Z]+ { yylval.string = sstrdup(yytext); return WORD; }
+<BAR_COLOR>{EOL}                {
+                                  yy_pop_state();
+                                  FREE(context->line_copy);
+                                  context->line_number++;
+                                  yy_push_state(BUFFER_LINE);
+                                }
+<BAR,BAR_COLORS,BAR_MODE,BAR_MODIFIER,BAR_POSITION>[a-zA-Z]+ { yylval.string = sstrdup(yytext); return WORD; }
 
 
 
@@ -144,17 +162,25 @@ EOL     (\r?\n)
 <OUTPUT_COND>[a-zA-Z0-9_-]+     { yy_pop_state(); yylval.string = sstrdup(yytext); return OUTPUT; }
 ^[ \t]*#[^\n]*                  { return TOKCOMMENT; }
 <COLOR_COND>#[0-9a-fA-F]+       { yy_pop_state(); yylval.string = sstrdup(yytext); return HEXCOLOR; }
+<COLOR_COND>{EOL}               {
+                                  yy_pop_state();
+                                  FREE(context->line_copy);
+                                  context->line_number++;
+                                  yy_push_state(BUFFER_LINE);
+                                }
 <ASSIGN_TARGET_COND>[ \t]*→[ \t]*     { BEGIN(WANT_STRING); }
 <ASSIGN_TARGET_COND>[ \t]+      { BEGIN(WANT_STRING); }
 <EXEC>--no-startup-id           { printf("no startup id\n"); yy_pop_state(); return TOK_NO_STARTUP_ID; }
 <EXEC>.                         { printf("anything else: *%s*\n", yytext); yyless(0); yy_pop_state(); yy_pop_state(); }
-[0-9]+                          { yylval.number = atoi(yytext); return NUMBER; }
+[0-9-]+                         { yylval.number = atoi(yytext); return NUMBER; }
 bar                             { yy_push_state(BAR); return TOK_BAR; }
 mode                            { return TOKMODE; }
 bind                            { yy_push_state(WANT_STRING); yy_push_state(EAT_WHITESPACE); yy_push_state(EAT_WHITESPACE); return TOKBINDCODE; }
 bindcode                        { yy_push_state(WANT_STRING); yy_push_state(EAT_WHITESPACE); yy_push_state(EAT_WHITESPACE); return TOKBINDCODE; }
 bindsym                         { yy_push_state(BINDSYM_COND); yy_push_state(EAT_WHITESPACE); return TOKBINDSYM; }
 snap_threshold                  { return TOK_SNAP_THRESHOLD; }
+floating_maximum_size           { return TOKFLOATING_MAXIMUM_SIZE; }
+floating_minimum_size           { return TOKFLOATING_MINIMUM_SIZE; }
 floating_modifier               { return TOKFLOATING_MODIFIER; }
 workspace                       { return TOKWORKSPACE; }
 output                          { yy_push_state(OUTPUT_COND); yy_push_state(EAT_WHITESPACE); return TOKOUTPUT; }
@@ -178,6 +204,9 @@ none                            { return TOK_NONE; }
 focus_follows_mouse             { return TOKFOCUSFOLLOWSMOUSE; }
 force_focus_wrapping            { return TOK_FORCE_FOCUS_WRAPPING; }
 force_xinerama                  { return TOK_FORCE_XINERAMA; }
+force-xinerama                  { return TOK_FORCE_XINERAMA; }
+fake_outputs                    { WS_STRING; return TOK_FAKE_OUTPUTS; }
+fake-outputs                    { WS_STRING; return TOK_FAKE_OUTPUTS; }
 workspace_auto_back_and_forth   { return TOK_WORKSPACE_AUTO_BAF; }
 workspace_bar                   { return TOKWORKSPACEBAR; }
 popup_during_fullscreen         { return TOK_POPUP_DURING_FULLSCREEN; }
@@ -205,10 +234,10 @@ rows                            { /* yylval.number = STACK_LIMIT_ROWS; */return 
 exec                            { WS_STRING; yy_push_state(EXEC); yy_push_state(EAT_WHITESPACE); return TOKEXEC; }
 exec_always                     { WS_STRING; yy_push_state(EXEC); yy_push_state(EAT_WHITESPACE); return TOKEXEC_ALWAYS; }
 client.background               { yy_push_state(COLOR_COND); yylval.single_color = &config.client.background; return TOKSINGLECOLOR; }
-client.focused                  { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.focused; return TOKCOLOR; }
-client.focused_inactive         { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.focused_inactive; return TOKCOLOR; }
-client.unfocused                { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.unfocused; return TOKCOLOR; }
-client.urgent                   { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.urgent; return TOKCOLOR; }
+client.focused                  { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.focused; return TOKCOLOR; }
+client.focused_inactive         { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.focused_inactive; return TOKCOLOR; }
+client.unfocused                { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.unfocused; return TOKCOLOR; }
+client.urgent                   { yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yy_push_state(COLOR_COND); yylval.color = &config.client.urgent; return TOKCOLOR; }
 bar.focused                     { yy_push_state(COLOR_COND); yylval.color = &config.bar.focused; return TOKCOLOR; }
 bar.unfocused                   { yy_push_state(COLOR_COND); yylval.color = &config.bar.unfocused; return TOKCOLOR; }
 bar.urgent                      { yy_push_state(COLOR_COND); yylval.color = &config.bar.urgent; return TOKCOLOR; }
@@ -229,6 +258,7 @@ id                              { yy_push_state(WANT_QSTRING); return TOK_ID; }
 con_id                          { yy_push_state(WANT_QSTRING); return TOK_CON_ID; }
 con_mark                        { yy_push_state(WANT_QSTRING); return TOK_MARK; }
 title                           { yy_push_state(WANT_QSTRING); return TOK_TITLE; }
+urgent                          { yy_push_state(WANT_QSTRING); return TOK_URGENT; }
 
 <*>{EOL}                        {
                                   FREE(context->line_copy);

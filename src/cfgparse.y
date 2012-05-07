@@ -51,7 +51,7 @@ void yyerror(const char *error_message) {
     ELOG("\n");
 }
 
-int yywrap() {
+int yywrap(void) {
     return 1;
 }
 
@@ -664,6 +664,8 @@ void parse_file(const char *f) {
 %token                  TOKCONTROL                  "control"
 %token                  TOKSHIFT                    "shift"
 %token                  TOKFLOATING_MODIFIER        "floating_modifier"
+%token                  TOKFLOATING_MAXIMUM_SIZE    "floating_maximum_size"
+%token                  TOKFLOATING_MINIMUM_SIZE    "floating_minimum_size"
 %token  <string>        QUOTEDSTRING                "<quoted string>"
 %token                  TOKWORKSPACE                "workspace"
 %token                  TOKOUTPUT                   "output"
@@ -691,6 +693,7 @@ void parse_file(const char *f) {
 %token                  TOKFOCUSFOLLOWSMOUSE        "focus_follows_mouse"
 %token                  TOK_FORCE_FOCUS_WRAPPING    "force_focus_wrapping"
 %token                  TOK_FORCE_XINERAMA          "force_xinerama"
+%token                  TOK_FAKE_OUTPUTS            "fake_outputs"
 %token                  TOK_WORKSPACE_AUTO_BAF      "workspace_auto_back_and_forth"
 %token                  TOKWORKSPACEBAR             "workspace_bar"
 %token                  TOK_DEFAULT                 "default"
@@ -709,10 +712,19 @@ void parse_file(const char *f) {
 %token                  TOK_BAR_MODE                "mode (bar)"
 %token                  TOK_BAR_HIDE                "hide"
 %token                  TOK_BAR_DOCK                "dock"
+%token                  TOK_BAR_MODIFIER            "modifier (bar)"
+%token                  TOK_BAR_CONTROL             "shift (bar)"
+%token                  TOK_BAR_SHIFT               "control (bar)"
+%token                  TOK_BAR_MOD1                "Mod1"
+%token                  TOK_BAR_MOD2                "Mod2"
+%token                  TOK_BAR_MOD3                "Mod3"
+%token                  TOK_BAR_MOD4                "Mod4"
+%token                  TOK_BAR_MOD5                "Mod5"
 %token                  TOK_BAR_POSITION            "position"
 %token                  TOK_BAR_BOTTOM              "bottom"
 %token                  TOK_BAR_TOP                 "top"
 %token                  TOK_BAR_STATUS_COMMAND      "status_command"
+%token                  TOK_BAR_I3BAR_COMMAND       "i3bar_command"
 %token                  TOK_BAR_FONT                "font (bar)"
 %token                  TOK_BAR_WORKSPACE_BUTTONS   "workspace_buttons"
 %token                  TOK_BAR_VERBOSE             "verbose"
@@ -732,6 +744,7 @@ void parse_file(const char *f) {
 %token              TOK_ID              "id"
 %token              TOK_CON_ID          "con_id"
 %token              TOK_TITLE           "title"
+%token              TOK_URGENT          "urgent"
 
 %type   <binding>       binding
 %type   <binding>       bindcode
@@ -748,6 +761,7 @@ void parse_file(const char *f) {
 %type   <number>        popup_setting
 %type   <number>        bar_position_position
 %type   <number>        bar_mode_mode
+%type   <number>        bar_modifier_modifier
 %type   <number>        optional_no_startup_id
 %type   <string>        command
 %type   <string>        word_or_number
@@ -768,6 +782,8 @@ line:
     | for_window
     | mode
     | bar
+    | floating_maximum_size
+    | floating_minimum_size
     | floating_modifier
     | snap_threshold
     | orientation
@@ -777,6 +793,7 @@ line:
     | focus_follows_mouse
     | force_focus_wrapping
     | force_xinerama
+    | fake_outputs
     | workspace_back_and_forth
     | workspace_bar
     | workspace
@@ -945,6 +962,20 @@ criterion:
         current_match.title = regex_new($3);
         free($3);
     }
+    | TOK_URGENT '=' STR
+    {
+        printf("criteria: urgent = %s\n", $3);
+        if (strcasecmp($3, "latest") == 0 ||
+            strcasecmp($3, "newest") == 0 ||
+            strcasecmp($3, "recent") == 0 ||
+            strcasecmp($3, "last") == 0) {
+            current_match.urgent = U_LATEST;
+        } else if (strcasecmp($3, "oldest") == 0 ||
+                   strcasecmp($3, "first") == 0) {
+            current_match.urgent = U_OLDEST;
+        }
+        free($3);
+    }
     ;
 
 qstring_or_number:
@@ -1038,10 +1069,12 @@ barlines:
 barline:
     comment
     | bar_status_command
+    | bar_i3bar_command
     | bar_output
     | bar_tray_output
     | bar_position
     | bar_mode
+    | bar_modifier
     | bar_font
     | bar_workspace_buttons
     | bar_verbose
@@ -1061,6 +1094,15 @@ bar_status_command:
         DLOG("should add status command %s\n", $2);
         FREE(current_bar.status_command);
         current_bar.status_command = $2;
+    }
+    ;
+
+bar_i3bar_command:
+    TOK_BAR_I3BAR_COMMAND STR
+    {
+        DLOG("should add i3bar_command %s\n", $2);
+        FREE(current_bar.i3bar_command);
+        current_bar.i3bar_command = $2;
     }
     ;
 
@@ -1108,6 +1150,23 @@ bar_mode:
 bar_mode_mode:
     TOK_BAR_HIDE   { $$ = M_HIDE; }
     | TOK_BAR_DOCK { $$ = M_DOCK; }
+    ;
+
+bar_modifier:
+    TOK_BAR_MODIFIER bar_modifier_modifier
+    {
+        DLOG("modifier %d\n", $2);
+        current_bar.modifier = $2;
+    };
+
+bar_modifier_modifier:
+    TOK_BAR_CONTROL { $$ = M_CONTROL; }
+    | TOK_BAR_SHIFT { $$ = M_SHIFT; }
+    | TOK_BAR_MOD1  { $$ = M_MOD1; }
+    | TOK_BAR_MOD2  { $$ = M_MOD2; }
+    | TOK_BAR_MOD3  { $$ = M_MOD3; }
+    | TOK_BAR_MOD4  { $$ = M_MOD4; }
+    | TOK_BAR_MOD5  { $$ = M_MOD5; }
     ;
 
 bar_font:
@@ -1174,36 +1233,90 @@ bar_color_statusline:
 bar_color_focused_workspace:
     TOK_BAR_COLOR_FOCUSED_WORKSPACE HEXCOLOR HEXCOLOR
     {
-        DLOG("focused_ws = %s and %s\n", $2, $3);
-        current_bar.colors.focused_workspace_text = $2;
+        /* Old syntax: text / background */
+        DLOG("focused_ws = %s, %s (old)\n", $2, $3);
         current_bar.colors.focused_workspace_bg = $3;
+        current_bar.colors.focused_workspace_text = $2;
+    }
+    | TOK_BAR_COLOR_FOCUSED_WORKSPACE HEXCOLOR HEXCOLOR HEXCOLOR
+    {
+        /* New syntax: border / background / text */
+        DLOG("focused_ws = %s, %s and %s\n", $2, $3, $4);
+        current_bar.colors.focused_workspace_border = $2;
+        current_bar.colors.focused_workspace_bg = $3;
+        current_bar.colors.focused_workspace_text = $4;
     }
     ;
 
 bar_color_active_workspace:
     TOK_BAR_COLOR_ACTIVE_WORKSPACE HEXCOLOR HEXCOLOR
     {
-        DLOG("active_ws = %s and %s\n", $2, $3);
-        current_bar.colors.active_workspace_text = $2;
+        /* Old syntax: text / background */
+        DLOG("active_ws = %s, %s (old)\n", $2, $3);
         current_bar.colors.active_workspace_bg = $3;
+        current_bar.colors.active_workspace_text = $2;
+    }
+    | TOK_BAR_COLOR_ACTIVE_WORKSPACE HEXCOLOR HEXCOLOR HEXCOLOR
+    {
+        /* New syntax: border / background / text */
+        DLOG("active_ws = %s, %s and %s\n", $2, $3, $4);
+        current_bar.colors.active_workspace_border = $2;
+        current_bar.colors.active_workspace_bg = $3;
+        current_bar.colors.active_workspace_text = $4;
     }
     ;
 
 bar_color_inactive_workspace:
     TOK_BAR_COLOR_INACTIVE_WORKSPACE HEXCOLOR HEXCOLOR
     {
-        DLOG("inactive_ws = %s and %s\n", $2, $3);
-        current_bar.colors.inactive_workspace_text = $2;
+        /* Old syntax: text / background */
+        DLOG("inactive_ws = %s, %s (old)\n", $2, $3);
         current_bar.colors.inactive_workspace_bg = $3;
+        current_bar.colors.inactive_workspace_text = $2;
+    }
+    | TOK_BAR_COLOR_INACTIVE_WORKSPACE HEXCOLOR HEXCOLOR HEXCOLOR
+    {
+        DLOG("inactive_ws = %s, %s and %s\n", $2, $3, $4);
+        current_bar.colors.inactive_workspace_border = $2;
+        current_bar.colors.inactive_workspace_bg = $3;
+        current_bar.colors.inactive_workspace_text = $4;
     }
     ;
 
 bar_color_urgent_workspace:
     TOK_BAR_COLOR_URGENT_WORKSPACE HEXCOLOR HEXCOLOR
     {
-        DLOG("urgent_ws = %s and %s\n", $2, $3);
-        current_bar.colors.urgent_workspace_text = $2;
+        /* Old syntax: text / background */
+        DLOG("urgent_ws = %s, %s (old)\n", $2, $3);
         current_bar.colors.urgent_workspace_bg = $3;
+        current_bar.colors.urgent_workspace_text = $2;
+    }
+    | TOK_BAR_COLOR_URGENT_WORKSPACE HEXCOLOR HEXCOLOR HEXCOLOR
+    {
+        DLOG("urgent_ws = %s, %s and %s\n", $2, $3, $4);
+        current_bar.colors.urgent_workspace_border = $2;
+        current_bar.colors.urgent_workspace_bg = $3;
+        current_bar.colors.urgent_workspace_text = $4;
+    }
+    ;
+
+floating_maximum_size:
+    TOKFLOATING_MAXIMUM_SIZE NUMBER WORD NUMBER
+    {
+        printf("floating_maximum_width = %d\n", $2);
+        printf("floating_maximum_height = %d\n", $4);
+        config.floating_maximum_width = $2;
+        config.floating_maximum_height = $4;
+    }
+    ;
+
+floating_minimum_size:
+    TOKFLOATING_MINIMUM_SIZE NUMBER WORD NUMBER
+    {
+        printf("floating_minimum_width = %d\n", $2);
+        printf("floating_minimum_height = %d\n", $4);
+        config.floating_minimum_width = $2;
+        config.floating_minimum_height = $4;
     }
     ;
 
@@ -1348,6 +1461,14 @@ force_xinerama:
     {
         DLOG("force xinerama = %d\n", $2);
         config.force_xinerama = $2;
+    }
+    ;
+
+fake_outputs:
+    TOK_FAKE_OUTPUTS STR
+    {
+        DLOG("fake outputs = %s\n", $2);
+        config.fake_outputs = $2;
     }
     ;
 
@@ -1564,6 +1685,7 @@ font:
     TOKFONT STR
     {
         config.font = load_font($2, true);
+        set_font(&config.font);
         printf("font %s\n", $2);
         FREE(font_pattern);
         font_pattern = $2;
@@ -1586,6 +1708,15 @@ color:
         dest->border = $2;
         dest->background = $3;
         dest->text = $4;
+    }
+    | TOKCOLOR colorpixel colorpixel colorpixel colorpixel
+    {
+        struct Colortriple *dest = $1;
+
+        dest->border = $2;
+        dest->background = $3;
+        dest->text = $4;
+        dest->indicator = $5;
     }
     ;
 

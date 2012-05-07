@@ -6,17 +6,13 @@
 #
 use i3test;
 
-my $x = X11::XCB::Connection->new;
-
 sub two_windows {
     my $tmp = fresh_workspace;
 
     ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-    my $first = open_window($x);
-    my $second = open_window($x);
-
-    sync_with_i3 $x;
+    my $first = open_window;
+    my $second = open_window;
 
     is($x->input_focus, $second->id, 'second window focused');
     ok(@{get_ws_content($tmp)} == 2, 'two containers opened');
@@ -32,8 +28,7 @@ sub two_windows {
 my $tmp = two_windows;
 
 cmd 'kill';
-
-sleep 0.25;
+sync_with_i3;
 
 ok(@{get_ws_content($tmp)} == 1, 'one container left after killing');
 
@@ -42,11 +37,10 @@ ok(@{get_ws_content($tmp)} == 1, 'one container left after killing');
 # 'kill window'
 ##############################################################
 
-my $tmp = two_windows;
+$tmp = two_windows;
 
 cmd 'kill window';
-
-sleep 0.25;
+sync_with_i3;
 
 ok(@{get_ws_content($tmp)} == 1, 'one container left after killing');
 
@@ -55,11 +49,12 @@ ok(@{get_ws_content($tmp)} == 1, 'one container left after killing');
 # and check if both are gone
 ##############################################################
 
-my $tmp = two_windows;
+$tmp = two_windows;
 
 cmd 'kill client';
-
-sleep 0.25;
+# We need to re-establish the X11 connection which we just killed :).
+$x = i3test::X11->new;
+sync_with_i3(no_cache => 1);
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers left after killing');
 

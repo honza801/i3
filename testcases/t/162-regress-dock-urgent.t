@@ -4,14 +4,8 @@
 # Regression test for setting the urgent hint on dock clients.
 # found in 4be3178d4d360c2996217d811e61161c84d25898
 #
-use X11::XCB qw(:all);
 use i3test;
 
-BEGIN {
-    use_ok('X11::XCB::Window');
-}
-
-my $x = X11::XCB::Connection->new;
 my $i3 = i3(get_socket_path());
 
 my $tmp = fresh_workspace;
@@ -27,16 +21,9 @@ is(@docked, 0, 'no dock clients yet');
 
 # open a dock client
 
-my $window = $x->root->create_child(
-    class => WINDOW_CLASS_INPUT_OUTPUT,
-    rect => [ 0, 0, 30, 30],
-    background_color => '#FF0000',
+my $window = open_window(
     window_type => $x->atom(name => '_NET_WM_WINDOW_TYPE_DOCK'),
 );
-
-$window->map;
-
-sleep 0.25;
 
 #####################################################################
 # check that we can find it in the layout tree at the expected position
@@ -52,7 +39,7 @@ is($docknode->{rect}->{height}, 30, 'dock node has unchanged height');
 
 $window->add_hint('urgency');
 
-sync_with_i3($x);
+sync_with_i3;
 
 does_i3_live;
 

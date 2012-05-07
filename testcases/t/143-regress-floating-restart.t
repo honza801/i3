@@ -8,16 +8,20 @@ use i3test;
 my $tmp = fresh_workspace;
 
 cmd 'open';
-cmd 'mode toggle';
-cmd 'restart';
+cmd 'floating toggle';
 
-sleep 0.5;
+my $ws = get_ws($tmp);
+is(scalar @{$ws->{nodes}}, 0, 'no tiling nodes');
+is(scalar @{$ws->{floating_nodes}}, 1, 'precisely one floating node');
+
+cmd 'restart';
 
 diag('Checking if i3 still lives');
 
 does_i3_live;
 
-my $ws = get_ws($tmp);
-diag('ws = ' . Dumper($ws));
+$ws = get_ws($tmp);
+is(scalar @{$ws->{nodes}}, 0, 'no tiling nodes');
+is(scalar @{$ws->{floating_nodes}}, 1, 'precisely one floating node');
 
 done_testing;

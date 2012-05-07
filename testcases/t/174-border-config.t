@@ -1,13 +1,10 @@
 #!perl
 # vim:ts=4:sw=4:expandtab
-# !NO_I3_INSTANCE! will prevent complete-run.pl from starting i3
 #
 # Tests the new_window and new_float config option.
 #
 
-use i3test;
-
-my $x = X11::XCB::Connection->new;
+use i3test i3_autostart => 0;
 
 #####################################################################
 # 1: check that new windows start with 'normal' border unless configured
@@ -25,7 +22,7 @@ my $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-my $first = open_window($x);
+my $first = open_window;
 
 my @content = @{get_ws_content($tmp)};
 ok(@content == 1, 'one container opened');
@@ -51,7 +48,7 @@ $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-$first = open_window($x);
+$first = open_window;
 
 @content = @{get_ws_content($tmp)};
 ok(@content == 1, 'one container opened');
@@ -75,7 +72,7 @@ $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-$first = open_floating_window($x);
+$first = open_floating_window;
 
 my $wscontent = get_ws($tmp);
 my @floating = @{$wscontent->{floating_nodes}};
@@ -103,7 +100,7 @@ $tmp = fresh_workspace;
 
 ok(@{get_ws_content($tmp)} == 0, 'no containers yet');
 
-$first = open_floating_window($x);
+$first = open_floating_window;
 
 $wscontent = get_ws($tmp);
 @floating = @{$wscontent->{floating_nodes}};
