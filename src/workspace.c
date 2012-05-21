@@ -112,14 +112,15 @@ Con *create_workspace_on_output(Output *output, Con *content) {
         DLOG("relevant command = %s\n", bind->command);
         char *target = bind->command + strlen("workspace ");
         /* We check if this is the workspace
-         * next/prev/next_on_output/prev_on_output/back_and_forth command.
+         * next/prev/next_on_output/prev_on_output/back_and_forth/number command.
          * Beware: The workspace names "next", "prev", "next_on_output",
-         * "prev_on_output" and "back_and_forth" are OK, so we check before
-         * stripping the double quotes */
+         * "prev_on_output", "number" and "back_and_forth" are OK, so we check
+         * before stripping the double quotes */
         if (strncasecmp(target, "next", strlen("next")) == 0 ||
             strncasecmp(target, "prev", strlen("prev")) == 0 ||
             strncasecmp(target, "next_on_output", strlen("next_on_output")) == 0 ||
             strncasecmp(target, "prev_on_output", strlen("prev_on_output")) == 0 ||
+            strncasecmp(target, "number", strlen("number")) == 0 ||
             strncasecmp(target, "back_and_forth", strlen("back_and_forth")) == 0)
             continue;
         if (*target == '"')
@@ -303,7 +304,7 @@ static void workspace_reassign_sticky(Con *con) {
 }
 
 
-static void _workspace_show(Con *workspace, bool changed_num_workspaces) {
+static void _workspace_show(Con *workspace) {
     Con *current, *old = NULL;
 
     /* safe-guard against showing i3-internal workspaces like __i3_scratch */
@@ -347,7 +348,6 @@ static void _workspace_show(Con *workspace, bool changed_num_workspaces) {
             LOG("Closing old workspace (%p / %s), it is empty\n", old, old->name);
             tree_close(old, DONT_KILL_WINDOW, false, false);
             ipc_send_event("workspace", I3_IPC_EVENT_WORKSPACE, "{\"change\":\"empty\"}");
-            changed_num_workspaces = true;
         }
     }
 
@@ -375,7 +375,7 @@ static void _workspace_show(Con *workspace, bool changed_num_workspaces) {
  *
  */
 void workspace_show(Con *workspace) {
-    _workspace_show(workspace, false);
+    _workspace_show(workspace);
 }
 
 /*
@@ -386,7 +386,7 @@ void workspace_show_by_name(const char *num) {
     Con *workspace;
     bool changed_num_workspaces;
     workspace = workspace_get(num, &changed_num_workspaces);
-    _workspace_show(workspace, changed_num_workspaces);
+    _workspace_show(workspace);
 }
 
 /*
