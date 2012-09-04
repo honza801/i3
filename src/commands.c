@@ -490,7 +490,7 @@ static void cmd_resize_floating(I3_CMD, char *way, char *direction, Con *floatin
     if (strcmp(direction, "up") == 0) {
         floating_con->rect.y -= px;
         floating_con->rect.height += px;
-    } else if (strcmp(direction, "down") == 0) {
+    } else if (strcmp(direction, "down") == 0 || strcmp(direction, "height") == 0) {
         floating_con->rect.height += px;
     } else if (strcmp(direction, "left") == 0) {
         floating_con->rect.x -= px;
@@ -1001,9 +1001,14 @@ void cmd_move_workspace_to_output(I3_CMD, char *name) {
     TAILQ_FOREACH(current, &owindows, owindows) {
         Output *current_output = get_output_containing(current->con->rect.x,
                                                        current->con->rect.y);
+        if (!current_output) {
+            ELOG("Cannot get current output. This is a bug in i3.\n");
+            ysuccess(false);
+            return;
+        }
         Output *output = get_output_from_string(current_output, name);
         if (!output) {
-            LOG("No such output\n");
+            ELOG("Could not get output from string \"%s\"\n", name);
             ysuccess(false);
             return;
         }
