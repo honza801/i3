@@ -446,7 +446,7 @@ void x_draw_decoration(Con *con) {
             xcb_change_gc(conn, con->pm_gc, XCB_GC_FOREGROUND, (uint32_t[]){ p->color->indicator });
             if (con_orientation(con->parent) == HORIZ)
                 xcb_poly_fill_rectangle(conn, con->pixmap, con->pm_gc, 1, (xcb_rectangle_t[]){
-                        { r->width + br.width + br.x, 0, r->width, r->height + br.height } });
+                        { r->width + br.width + br.x, br.y, r->width, r->height + br.height } });
             else
                 xcb_poly_fill_rectangle(conn, con->pixmap, con->pm_gc, 1, (xcb_rectangle_t[]){
                         { br.x, r->height + br.height + br.y, r->width - (2 * br.x), r->height } });
@@ -792,7 +792,7 @@ static void x_push_node_unmaps(Con *con) {
         }
 
         cookie = xcb_unmap_window(conn, con->frame);
-        DLOG("unmapping container (serial %d)\n", cookie.sequence);
+        DLOG("unmapping container %p / %s (serial %d)\n", con, con->name, cookie.sequence);
         /* we need to increase ignore_unmap for this container (if it
          * contains a window) and for every window "under" this one which
          * contains a window */
