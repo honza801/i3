@@ -47,6 +47,33 @@ ok(get_ws($second_ws)->{focused}, 'second workspace focused');
 cmd qq|workspace "$second_ws"|;
 ok(get_ws($second_ws)->{focused}, 'second workspace still focused');
 
+################################################################################
+# verify that 'move workspace back_and_forth' works as expected
+################################################################################
+
+cmd qq|workspace "$first_ws"|;
+my $first_win = open_window;
+
+cmd qq|workspace "$second_ws"|;
+my $second_win = open_window;
+
+is(@{get_ws_content($first_ws)}, 1, 'one container on ws 1 before moving');
+cmd 'move workspace back_and_forth';
+is(@{get_ws_content($first_ws)}, 2, 'two containers on ws 1 before moving');
+
+my $third_win = open_window;
+
+################################################################################
+# verify that moving to the current ws is a no-op without
+# workspace_auto_back_and_forth.
+################################################################################
+
+cmd qq|workspace "$first_ws"|;
+
+is(@{get_ws_content($second_ws)}, 1, 'one container on ws 2 before moving');
+cmd qq|move workspace "$first_ws"|;
+is(@{get_ws_content($second_ws)}, 1, 'still one container');
+
 exit_gracefully($pid);
 
 #####################################################################
@@ -72,6 +99,19 @@ ok(get_ws($third_ws)->{focused}, 'third workspace focused');
 
 cmd qq|workspace "$third_ws"|;
 ok(get_ws($second_ws)->{focused}, 'second workspace focused');
+$first_win = open_window;
+
+################################################################################
+# verify that moving to the current ws moves to the previous one with
+# workspace_auto_back_and_forth.
+################################################################################
+
+cmd qq|workspace "$first_ws"|;
+$second_win = open_window;
+
+is(@{get_ws_content($second_ws)}, 1, 'one container on ws 2 before moving');
+cmd qq|move workspace "$first_ws"|;
+is(@{get_ws_content($second_ws)}, 2, 'two containers on ws 2');
 
 ################################################################################
 # Now see if "workspace number <number>" also works as expected with
@@ -105,6 +145,23 @@ is(focused_ws, '6: baz', 'workspace 6 now focused');
 
 cmd 'workspace number 6';
 is(focused_ws, '5: foo', 'workspace 5 focused again');
+
+################################################################################
+# Place a window in the scratchpad, see if BAF works after showing the
+# scratchpad window.
+################################################################################
+
+my $scratchwin = open_window;
+cmd 'move scratchpad';
+
+# show scratchpad window
+cmd 'scratchpad show';
+
+# hide scratchpad window
+cmd 'scratchpad show';
+
+cmd 'workspace back_and_forth';
+is(focused_ws, '6: baz', 'workspace 6 now focused');
 
 exit_gracefully($pid);
 
