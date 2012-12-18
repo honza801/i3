@@ -22,6 +22,7 @@ state INITIAL:
   'bar'                                    -> BARBRACE
   'font'                                   -> FONT
   'mode'                                   -> MODENAME
+  'snap_threshold'                         -> SNAP_THRESHOLD
   'floating_minimum_size'                  -> FLOATING_MINIMUM_SIZE_WIDTH
   'floating_maximum_size'                  -> FLOATING_MAXIMUM_SIZE_WIDTH
   'floating_modifier'                      -> FLOATING_MODIFIER
@@ -51,6 +52,10 @@ state INITIAL:
 state IGNORE_LINE:
   end, string
       -> INITIAL
+
+state SNAP_THRESHOLD:
+  snap_threshold = number
+      -> call cfg_snap_threshold(&snap_threshold)
 
 # floating_minimum_size <width> x <height>
 state FLOATING_MINIMUM_SIZE_WIDTH:

@@ -261,6 +261,10 @@ CFGFUN(for_window, const char *command) {
     TAILQ_INSERT_TAIL(&assignments, assignment, assignments);
 }
 
+CFGFUN(snap_threshold, const long snap_threshold) {
+    config.snap_threshold = snap_threshold;
+}
+
 CFGFUN(floating_minimum_size, const long width, const long height) {
     config.floating_minimum_width = width;
     config.floating_minimum_height = height;
