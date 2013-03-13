@@ -26,7 +26,7 @@ sub parser_calls {
 
     my $stdout;
     run [ '../test.config_parser', $command ],
-        '>&-',
+        '>/dev/null',
         '2>', \$stdout;
     # TODO: use a timeout, so that we can error out if it doesn’t terminate
 
@@ -145,6 +145,27 @@ is(parser_calls($config),
    'floating_minimum_size ok');
 
 ################################################################################
+# popup_during_fullscreen
+################################################################################
+
+$config = <<'EOT';
+popup_during_fullscreen ignore
+popup_during_fullscreen leave_fullscreen
+popup_during_fullscreen SMArt
+EOT
+
+$expected = <<'EOT';
+cfg_popup_during_fullscreen(ignore)
+cfg_popup_during_fullscreen(leave_fullscreen)
+cfg_popup_during_fullscreen(smart)
+EOT
+
+is(parser_calls($config),
+   $expected,
+   'popup_during_fullscreen ok');
+
+
+################################################################################
 # floating_modifier
 ################################################################################
 
@@ -203,6 +224,24 @@ EOT
 is(parser_calls($config),
    $expected,
    'workspace_layout ok');
+
+################################################################################
+# workspace assignments, with trailing whitespace (ticket #921)
+################################################################################
+
+$config = <<'EOT';
+workspace "3" output DP-1 
+workspace "3" output     	VGA-1	
+EOT
+
+$expected = <<'EOT';
+cfg_workspace(3, DP-1)
+cfg_workspace(3, VGA-1)
+EOT
+
+is(parser_calls($config),
+   $expected,
+   'workspace assignment ok');
 
 ################################################################################
 # new_window
@@ -373,14 +412,19 @@ hide_edge_border both
 client.focused          #4c7899 #285577 #ffffff #2e9ef4
 EOT
 
-$expected = <<'EOT';
+my $expected_all_tokens = <<'EOT';
 ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+EOT
+
+my $expected_end = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   1: hide_edge_border both
 ERROR: CONFIG:           ^^^^^^^^^^^^^^^^^^^^^
 ERROR: CONFIG: Line   2: client.focused          #4c7899 #285577 #ffffff #2e9ef4
 cfg_color(client.focused, #4c7899, #285577, #ffffff, #2e9ef4)
 EOT
+
+$expected = $expected_all_tokens . $expected_end;
 
 is(parser_calls($config),
    $expected,
@@ -420,9 +464,11 @@ unknown qux
 # this should not show up
 EOT
 
-$expected = <<'EOT';
+my $expected_head = <<'EOT';
 cfg_font(foobar)
-ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+EOT
+
+my $expected_tail = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   3: font foobar
 ERROR: CONFIG: Line   4: 
@@ -431,6 +477,8 @@ ERROR: CONFIG:           ^^^^^^^^^^^
 ERROR: CONFIG: Line   6: 
 ERROR: CONFIG: Line   7: # yay
 EOT
+
+$expected = $expected_head . $expected_all_tokens . $expected_tail;
 
 is(parser_calls($config),
    $expected,
@@ -444,12 +492,13 @@ $config = <<'EOT';
 unknown qux
 EOT
 
-$expected = <<'EOT';
-ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+$expected_tail = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   1: unknown qux
 ERROR: CONFIG:           ^^^^^^^^^^^
 EOT
+
+$expected = $expected_all_tokens . $expected_tail;
 
 is(parser_calls($config),
    $expected,
@@ -464,13 +513,14 @@ $config = <<'EOT';
 unknown qux
 EOT
 
-$expected = <<'EOT';
-ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+$expected_tail = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   1: # context before
 ERROR: CONFIG: Line   2: unknown qux
 ERROR: CONFIG:           ^^^^^^^^^^^
 EOT
+
+$expected = $expected_all_tokens . $expected_tail;
 
 is(parser_calls($config),
    $expected,
@@ -485,13 +535,14 @@ unknown qux
 # context after
 EOT
 
-$expected = <<'EOT';
-ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+$expected_tail = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   1: unknown qux
 ERROR: CONFIG:           ^^^^^^^^^^^
 ERROR: CONFIG: Line   2: # context after
 EOT
+
+$expected = $expected_all_tokens . $expected_tail;
 
 is(parser_calls($config),
    $expected,
@@ -507,14 +558,15 @@ unknown qux
 # context 2 after
 EOT
 
-$expected = <<'EOT';
-ERROR: CONFIG: Expected one of these tokens: <end>, '#', 'set', 'bindsym', 'bindcode', 'bind', 'bar', 'font', 'mode', 'floating_minimum_size', 'floating_maximum_size', 'floating_modifier', 'default_orientation', 'workspace_layout', 'new_window', 'new_float', 'hide_edge_borders', 'for_window', 'assign', 'focus_follows_mouse', 'force_focus_wrapping', 'force_xinerama', 'force-xinerama', 'workspace_auto_back_and_forth', 'fake_outputs', 'fake-outputs', 'force_display_urgency_hint', 'workspace', 'ipc_socket', 'ipc-socket', 'restart_state', 'popup_during_fullscreen', 'exec_always', 'exec', 'client.background', 'client.focused_inactive', 'client.focused', 'client.unfocused', 'client.urgent'
+$expected_tail = <<'EOT';
 ERROR: CONFIG: (in file <stdin>)
 ERROR: CONFIG: Line   1: unknown qux
 ERROR: CONFIG:           ^^^^^^^^^^^
 ERROR: CONFIG: Line   2: # context after
 ERROR: CONFIG: Line   3: # context 2 after
 EOT
+
+$expected = $expected_all_tokens . $expected_tail;
 
 is(parser_calls($config),
    $expected,

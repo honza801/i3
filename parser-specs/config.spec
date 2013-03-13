@@ -219,7 +219,7 @@ state WORKSPACE_OUTPUT:
       -> WORKSPACE_OUTPUT_STR
 
 state WORKSPACE_OUTPUT_STR:
-  output = string
+  output = word
       -> call cfg_workspace($workspace, $output)
 
 # ipc-socket <path>
@@ -234,7 +234,7 @@ state RESTART_STATE:
 
 # popup_during_fullscreen
 state POPUP_DURING_FULLSCREEN:
-  value = 'ignore', 'leave_fullscreen'
+  value = 'ignore', 'leave_fullscreen', 'smart'
       -> call cfg_popup_during_fullscreen($value)
 
 # client.background <hexcolor>
@@ -277,7 +277,7 @@ state FONT:
 state BINDING:
   release = '--release'
       ->
-  modifiers = 'Mod1', 'Mod2', 'Mod3', 'Mod4', 'Mod5', 'Shift', 'Control', 'Ctrl', 'Mode_switch'
+  modifiers = 'Mod1', 'Mod2', 'Mod3', 'Mod4', 'Mod5', 'Shift', 'Control', 'Ctrl', 'Mode_switch', '$mod'
       ->
   '+'
       ->
@@ -322,7 +322,7 @@ state MODE_IGNORE_LINE:
 state MODE_BINDING:
   release = '--release'
       ->
-  modifiers = 'Mod1', 'Mod2', 'Mod3', 'Mod4', 'Mod5', 'Shift', 'Control', 'Ctrl', 'Mode_switch'
+  modifiers = 'Mod1', 'Mod2', 'Mod3', 'Mod4', 'Mod5', 'Shift', 'Control', 'Ctrl', 'Mode_switch', '$mod'
       ->
   '+'
       ->
@@ -424,7 +424,7 @@ state BAR_COLORS:
   end ->
   '#' -> BAR_COLORS_IGNORE_LINE
   'set' -> BAR_COLORS_IGNORE_LINE
-  colorclass = 'background', 'statusline'
+  colorclass = 'background', 'statusline', 'separator'
       -> BAR_COLORS_SINGLE
   colorclass = 'focused_workspace', 'active_workspace', 'inactive_workspace', 'urgent_workspace'
       -> BAR_COLORS_BORDER
