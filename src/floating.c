@@ -608,7 +608,6 @@ DRAGGING_CB(resize_window_callback) {
     if (corner & BORDER_TOP)
         dest_y = old_rect->y + (old_rect->height - con->rect.height);
 
-<<<<<<< HEAD
     if (config.snap_threshold > 0) {
         Rect mrect = (Rect) { dest_x, dest_y, dest_width, dest_height };
 
