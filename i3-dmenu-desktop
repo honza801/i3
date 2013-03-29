@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # vim:ts=4:sw=4:expandtab
 #
-# © 2012 Michael Stapelberg
+# © 2012-2013 Michael Stapelberg
 #
 # No dependencies except for perl ≥ v5.10
 
@@ -45,7 +45,7 @@ my $result = GetOptions(
     'dmenu=s' => \$dmenu_cmd,
     'entry-type=s' => \@entry_types,
     'version' => sub {
-        say "dmenu-desktop 1.4 © 2012 Michael Stapelberg";
+        say "dmenu-desktop 1.4 © 2012-2013 Michael Stapelberg";
         exit 0;
     },
     'help' => sub {
@@ -306,7 +306,14 @@ for my $app (keys %apps) {
 
 # open2 will just make dmenu’s STDERR go to our own STDERR.
 my ($dmenu_out, $dmenu_in);
-my $pid = open2($dmenu_out, $dmenu_in, $dmenu_cmd);
+my $pid = eval {
+    open2($dmenu_out, $dmenu_in, $dmenu_cmd);
+} or do {
+    print STDERR "$@";
+    say STDERR "Running dmenu failed. Is dmenu installed at all? Try running dmenu -v";
+    exit 1;
+};
+
 binmode $dmenu_in, ':utf8';
 binmode $dmenu_out, ':utf8';
 
