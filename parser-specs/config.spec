@@ -50,7 +50,7 @@ state INITIAL:
 
 # We ignore comments and 'set' lines (variables).
 state IGNORE_LINE:
-  end, string
+  line
       -> INITIAL
 
 state SNAP_THRESHOLD:
@@ -316,7 +316,7 @@ state MODE:
 
 # We ignore comments and 'set' lines (variables).
 state MODE_IGNORE_LINE:
-  end, string
+  line
       -> MODE
 
 state MODE_BINDING:
@@ -354,6 +354,8 @@ state BAR:
   'status_command'    -> BAR_STATUS_COMMAND
   'socket_path'       -> BAR_SOCKET_PATH
   'mode'              -> BAR_MODE
+  'hidden_state'      -> BAR_HIDDEN_STATE
+  'id'                -> BAR_ID
   'modifier'          -> BAR_MODIFIER
   'position'          -> BAR_POSITION
   'output'            -> BAR_OUTPUT
@@ -367,7 +369,7 @@ state BAR:
 
 # We ignore comments and 'set' lines (variables).
 state BAR_IGNORE_LINE:
-  end, string
+  line
       -> BAR
 
 state BAR_BAR_COMMAND:
@@ -383,8 +385,16 @@ state BAR_SOCKET_PATH:
       -> call cfg_bar_socket_path($path); BAR
 
 state BAR_MODE:
-  mode = 'dock', 'hide'
+  mode = 'dock', 'hide', 'invisible'
       -> call cfg_bar_mode($mode); BAR
+
+state BAR_HIDDEN_STATE:
+  hidden_state = 'hide', 'show'
+      -> call cfg_bar_hidden_state($hidden_state); BAR
+
+state BAR_ID:
+  bar_id = word
+      -> call cfg_bar_id($bar_id); BAR
 
 state BAR_MODIFIER:
   modifier = 'Mod1', 'Mod2', 'Mod3', 'Mod4', 'Mod5', 'Control', 'Ctrl', 'Shift'
@@ -433,7 +443,7 @@ state BAR_COLORS:
 
 # We ignore comments and 'set' lines (variables).
 state BAR_COLORS_IGNORE_LINE:
-  end, string
+  line
       -> BAR_COLORS
 
 state BAR_COLORS_SINGLE:
