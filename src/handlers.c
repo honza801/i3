@@ -423,6 +423,19 @@ int handle_configure_event(void *prophs, xcb_connection_t *conn, xcb_configure_n
 static void handle_screen_change(xcb_generic_event_t *e) {
     DLOG("RandR screen change\n");
 
+    /* The geometry of the root window is used for “fullscreen global” and
+     * changes when new outputs are added. */
+    xcb_get_geometry_cookie_t cookie = xcb_get_geometry(conn, root);
+    xcb_get_geometry_reply_t *reply = xcb_get_geometry_reply(conn, cookie, NULL);
+    if (reply == NULL) {
+        ELOG("Could not get geometry of the root window, exiting\n");
+        exit(1);
+    }
+    DLOG("root geometry reply: (%d, %d) %d x %d\n", reply->x, reply->y, reply->width, reply->height);
+
+    croot->rect.width = reply->width;
+    croot->rect.height = reply->height;
+
     randr_query_outputs();
 
     scratchpad_fix_resolution();
@@ -693,35 +706,26 @@ static void handle_client_message(xcb_client_message_event_t *event) {
         xcb_flush(conn);
         free(reply);
     } else if (event->type == A__NET_REQUEST_FRAME_EXTENTS) {
-        // A client can request an estimate for the frame size which the window
-        // manager will put around it before actually mapping its window. Java
-        // does this (as of openjdk-7).
-        //
-        // Note that the calculation below is not entirely accurate — once you
-        // set a different border type, it’s off. We _could_ request all the
-        // window properties (which have to be set up at this point according
-        // to EWMH), but that seems rather elaborate. The standard explicitly
-        // says the application must cope with an estimate that is not entirely
-        // accurate.
+        /*
+         * A client can request an estimate for the frame size which the window
+         * manager will put around it before actually mapping its window. Java
+         * does this (as of openjdk-7).
+         *
+         * Note that the calculation below is not entirely accurate — once you
+         * set a different border type, it’s off. We _could_ request all the
+         * window properties (which have to be set up at this point according
+         * to EWMH), but that seems rather elaborate. The standard explicitly
+         * says the application must cope with an estimate that is not entirely
+         * accurate.
+         */
         DLOG("_NET_REQUEST_FRAME_EXTENTS for window 0x%08x\n", event->window);
-        xcb_get_geometry_reply_t *geometry;
-        xcb_get_geometry_cookie_t cookie = xcb_get_geometry(conn, event->window);
 
-        if (!(geometry = xcb_get_geometry_reply(conn, cookie, NULL))) {
-            ELOG("Could not get geometry of X11 window 0x%08x while handling "
-                 "the _NET_REQUEST_FRAME_EXTENTS ClientMessage\n",
-                 event->window);
-            return;
-        }
-
-        DLOG("Current geometry = x=%d, y=%d, width=%d, height=%d\n",
-             geometry->x, geometry->y, geometry->width, geometry->height);
-
+        /* The reply data: approximate frame size */
         Rect r = {
-            0, // left
-            geometry->width + 4, // right
-            0, // top
-            geometry->height + config.font.height + 5, // bottom
+            config.default_border_width, /* left */
+            config.default_border_width, /* right */
+            config.font.height + 5, /* top */
+            config.default_border_width /* bottom */
         };
         xcb_change_property(
                 conn,
@@ -870,24 +874,13 @@ static bool handle_hints(void *data, xcb_connection_t *conn, uint8_t state, xcb_
         return false;
     }
 
-    xcb_icccm_wm_hints_t hints;
-
+    bool urgency_hint;
     if (reply == NULL)
-        if (!(reply = xcb_get_property_reply(conn, xcb_icccm_get_wm_hints(conn, window), NULL)))
-            return false;
-
-    if (!xcb_icccm_get_wm_hints_from_reply(&hints, reply))
-        return false;
-
-    /* Update the flag on the client directly */
-    bool hint_urgent = (xcb_icccm_wm_hints_get_urgency(&hints) != 0);
-    con_set_urgency(con, hint_urgent);
-
+        reply = xcb_get_property_reply(conn, xcb_icccm_get_wm_hints(conn, window), NULL);
+    window_update_hints(con->window, reply, &urgency_hint);
+    con_set_urgency(con, urgency_hint);
     tree_render();
 
-    if (con->window)
-        window_update_hints(con->window, reply);
-    else free(reply);
     return true;
 }
 
